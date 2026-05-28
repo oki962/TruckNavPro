@@ -6,7 +6,7 @@
     <title>TruckNav Pro</title>
     <script src="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.umd.min.js"></script>
     <link href="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.css" rel="stylesheet" />
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=2">
 </head>
 
 <body>
@@ -30,7 +30,7 @@
                     <input type="hidden" class="lat-val" id="lat-start"><input type="hidden" class="lng-val" id="lng-start">
                     <button class="icon-btn remove-btn" onclick="removePoint(this)" style="display:none;">✖</button>
                 </div>
-                
+
                 <div class="input-wrapper autocomplete-container route-point" style="margin-top: 6px;">
                     <div class="drag-handle">⋮⋮</div>
                     <input type="text" class="place-input" id="input-dest" placeholder="Cel docelowy...">
@@ -40,7 +40,7 @@
             </div>
             <button class="add-wp-btn" onclick="addWaypoint()">+ Dodaj przystanek</button>
         </div>
-        
+
         <div class="profile-selector">
             <button class="profile-btn-main" onclick="toggleProfileMenu()">
                 <span id="active-profile-name">Wczytywanie...</span>
@@ -48,14 +48,14 @@
             </button>
             <div class="profile-options" id="profile-options"></div>
         </div>
-        
+
         <button class="calc-btn" id="calc-btn-text" onclick="calculateRoute()">Wyznacz trasę</button>
     </div>
 
     <div class="modal-overlay" id="settings-modal">
         <div class="modal-content">
             <div class="modal-header">Parametry Pojazdu</div>
-            
+
             <div class="form-group">
                 <label>Nazwa własna pojazdu</label>
                 <input type="text" id="v-name" placeholder="np. Zestaw Chłodnia">
@@ -148,6 +148,6 @@
     <div id="map"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
-    <script src="app.js"></script>
+    <script src="app.js?v=2"></script>
 </body>
 </html>

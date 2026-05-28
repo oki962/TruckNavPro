@@ -263,3 +263,7 @@ button.calc-btn:hover { background: #1557b0; transform: translateY(-1px); }
 }
 
 .btn-navigate:hover { background: #1557b0; transform: translateY(-1px); }
+/* Odsuwamy wbudowane przyciski nawigacyjne mapy, żeby nie zachodziły na naszą własną wyszukiwarkę u góry */
+.maplibregl-ctrl-top-right, .maptiler-ctrl-top-right {
+    top: 85px !important;
+}

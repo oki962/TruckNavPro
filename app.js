@@ -1,6 +1,6 @@
 let map, currentUserLocation;
-const tomtomKey = "NV8IZgye8glN2QW5GtAHlFo11LAVS0G4"; 
-const maptilerKey = "SBcreDqKo6myDrCeUBGs";
+const tomtomKey = "";
+const maptilerKey = "";
 
 let restrictionMarkers = [];
 let currentRoutesData = null; // Przechowuje trasy wektorowe
@@ -24,7 +24,7 @@ let overpassTimeout; // Hamulec dla zapytań do Overpass API
 
 function initMap() {
     maptilersdk.config.apiKey = maptilerKey;
-    maptilersdk.config.primaryLanguage = maptilersdk.Language.POLISH; 
+    maptilersdk.config.primaryLanguage = maptilersdk.Language.POLISH;
 
     map = new maptilersdk.Map({
         container: 'map',
@@ -75,10 +75,10 @@ async function fetchRestrictions() {
 
     const bounds = map.getBounds();
     const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
-    
+
     // ZMIANA: Dodajemy timeout:5, żeby serwer szybko ucinał zapytanie jeśli jest za duże, zamiast wisieć
     const query = `[out:json][timeout:5];(way["maxheight"](${bbox});node["maxheight"](${bbox});way["maxweight"](${bbox});node["maxweight"](${bbox}););out center;`;
-    
+
     // ZMIANA: Używamy szybszego klastra (lz4)
     const url = `https://lz4.overpass-api.de/api/interpreter`;
 
@@ -91,19 +91,19 @@ async function fetchRestrictions() {
             },
             body: `data=${encodeURIComponent(query)}`
         });
-        
+
         // Cicha obsługa limitów - jeśli przesadzimy, apka po prostu ignoruje próbę
         if (res.status === 429) {
             console.warn("Overpass: Limit zapytań. Przesuwaj mapę wolniej.");
-            return; 
+            return;
         }
-        
+
         if (!res.ok) throw new Error(`HTTP status: ${res.status}`);
         const data = await res.json();
-        
+
         restrictionMarkers.forEach(m => m.remove());
         restrictionMarkers = [];
-        
+
         data.elements.forEach(el => {
             const lat = el.lat || (el.center && el.center.lat);
             const lon = el.lon || (el.center && el.center.lon);
@@ -111,24 +111,24 @@ async function fetchRestrictions() {
 
             let text = "";
             let cssClass = "restriction-marker";
-            
+
             // Pobieramy surowe wartości z bazy
             let h = el.tags.maxheight;
             let w = el.tags.maxweight;
 
             // Tworzymy filtr: sprawdzamy, czy w wartości znajduje się jakakolwiek cyfra (0-9)
             const hasNumber = (val) => /\d/.test(val);
-            
+
             // Rysujemy znak TYLKO jeśli ma konkretną wartość liczbową (omijamy "default", "none", "unsigned")
-            if(h && hasNumber(h)) { 
+            if(h && hasNumber(h)) {
                 // Czasami w OSM ktoś wpisze "3,5" zamiast "3.5" - ujednolicamy to dla estetyki
-                text = `↕ ${h.replace(',', '.')}`; 
+                text = `↕ ${h.replace(',', '.')}`;
             }
-            else if(w && hasNumber(w)) { 
-                text = `⚖ ${w.replace(',', '.')}`; 
-                cssClass += " weight"; 
+            else if(w && hasNumber(w)) {
+                text = `⚖ ${w.replace(',', '.')}`;
+                cssClass += " weight";
             }
-            
+
             if(text) {
                 const elDiv = document.createElement('div');
                 elDiv.className = cssClass;
@@ -137,8 +137,8 @@ async function fetchRestrictions() {
                 restrictionMarkers.push(marker);
             }
         });
-    } catch(e) { 
-        console.log("Overpass: Zbyt duży obszar lub serwer zajęty. Zrób zoom.", e.message); 
+    } catch(e) {
+        console.log("Overpass: Zbyt duży obszar lub serwer zajęty. Zrób zoom.", e.message);
     }
 }
 
@@ -146,7 +146,7 @@ async function fetchRestrictions() {
 // 4. INTELIGENTNA WYSZUKIWARKA (Kaskada + GPS)
 // =========================================================================
 let searchTimeout;
-const searchCache = {}; 
+const searchCache = {};
 
 function setupAutocomplete(inputId) {
     const inputEl = document.getElementById(inputId);
@@ -201,7 +201,7 @@ function setupAutocomplete(inputId) {
                     else fallbackToTomTom(query, dropdown, inputEl, wrapper);
                 }).catch(() => fallbackToTomTom(query, dropdown, inputEl, wrapper));
             }).catch(() => fallbackToTomTom(query, dropdown, inputEl, wrapper));
-        }, 600); 
+        }, 600);
     });
 
     document.getElementsByTagName('body')[0].addEventListener('click', (e) => { if (!wrapper.contains(e.target)) dropdown.style.display = 'none'; });
@@ -291,9 +291,9 @@ async function calculateRoute() {
         document.getElementById('calc-btn-text').innerText = "Szukam trasy...";
         const response = await fetch(url);
         const data = await response.json();
-        
+
         currentRoutesData = { type: 'FeatureCollection', features: [] };
-        
+
         if (data.routes && data.routes.length > 0) {
             data.routes.forEach((route, idx) => {
                 const path = route.legs.flatMap(leg => leg.points.map(pt => [pt.longitude, pt.latitude]));
@@ -322,14 +322,14 @@ async function calculateRoute() {
                 map.getSource('routes').setData(currentRoutesData);
             } else {
                 map.addSource('routes', { type: 'geojson', data: currentRoutesData });
-                
+
                 // Szeroka, niewidzialna warstwa do ułatwienia klikania palcem na ekranie
                 map.addLayer({
                     id: 'routes-click', type: 'line', source: 'routes',
                     layout: { 'line-join': 'round', 'line-cap': 'round' },
                     paint: { 'line-width': 30, 'line-opacity': 0 }
                 });
-                
+
                 // Właściwa widoczna linia
                 map.addLayer({
                     id: 'routes-line', type: 'line', source: 'routes',
@@ -346,7 +346,7 @@ async function calculateRoute() {
                     const clickedIdx = e.features[0].properties.index;
                     currentRoutesData.features.forEach(f => f.properties.isMain = (f.properties.index === clickedIdx));
                     map.getSource('routes').setData(currentRoutesData);
-                    
+
                     const p = currentRoutesData.features.find(f => f.properties.isMain).properties;
                     updateTelemetryPanel(p);
                     renderRouteTooltips();
@@ -420,7 +420,7 @@ function setupSimpleSearch(inputId) {
     const inputEl = document.getElementById(inputId);
     if(!inputEl) return;
     const wrapper = inputEl.parentElement;
-    
+
     let dropdown = wrapper.querySelector('.autocomplete-dropdown');
     if (!dropdown) {
         dropdown = document.createElement('div');
@@ -434,12 +434,12 @@ function setupSimpleSearch(inputId) {
         if (query.length < 3) { dropdown.style.display = 'none'; return; }
 
         searchTimeout = setTimeout(() => {
-            const center = map.getCenter(); // Kotwica GPS 
-            
+            const center = map.getCenter(); // Kotwica GPS
+
             // 1. DARMOWY PHOTON (Zasięg: Europa) - 0 PLN
             const europeBbox = "&bbox=-10.0,35.0,40.0,70.0";
             const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(query)}&limit=5${europeBbox}&lat=${center.lat}&lon=${center.lng}`;
-            
+
             fetch(photonUrl)
             .then(res => {
                 if (!res.ok) throw new Error("Błąd OSM");
@@ -460,13 +460,13 @@ function setupSimpleSearch(inputId) {
                         };
                     }), dropdown, inputEl);
                 } else {
-                    throw new Error("Pusto w darmowej bazie"); 
+                    throw new Error("Pusto w darmowej bazie");
                 }
             })
             .catch(() => {
                 // 2. KASKADA: TOMTOM (1 płatne zapytanie)
                 const tomtomUrl = `https://api.tomtom.com/search/2/search/${encodeURIComponent(query)}.json?key=${tomtomKey}&language=pl-PL&limit=5&typeahead=true&lat=${center.lat}&lon=${center.lng}`;
-                
+
                 fetch(tomtomUrl)
                 .then(res => res.json())
                 .then(data => {
@@ -486,123 +486,28 @@ function setupSimpleSearch(inputId) {
                 })
                 .catch(err => console.error("Błąd sieciowy TomTom:", err));
             });
-        }, 500); 
+        }, 500);
     });
 
-    document.getElementsByTagName('body')[0].addEventListener('click', (e) => { 
-        if (!wrapper.contains(e.target)) dropdown.style.display = 'none'; 
+    document.getElementsByTagName('body')[0].addEventListener('click', (e) => {
+        if (!wrapper.contains(e.target)) dropdown.style.display = 'none';
     });
 }
 
-function renderSimpleDropdown(results, dropdown, inputEl) {
-    dropdown.innerHTML = '';
-    results.forEach(r => {
-        const icon = r.isPOI ? "🏢" : "📍"; 
-        const item = document.createElement('div');
-        item.className = 'autocomplete-item';
-        
-        item.innerHTML = `<strong>${icon} ${r.name}</strong> <span style="font-size: 10px; color: #888;">[${r.source}]</span><br><small>${r.context}</small>`;
-        
-        item.onclick = () => {
-            inputEl.value = r.name;
-            dropdown.style.display = 'none';
-            dropPinAndShowAction(r.lat, r.lng, r.name, r.context);
-        };
-        dropdown.appendChild(item);
-    });
-    dropdown.style.display = 'block';
-}
-
-function dropPinAndShowAction(lat, lng, name, context) {
-    map.flyTo({ center: [lng, lat], zoom: 15.5, pitch: 45 });
-    if (destinationMarker) destinationMarker.remove();
-
-    destinationMarker = new maptilersdk.Marker({ color: "#ef4444" })
-        .setLngLat([lng, lat])
-        .setPopup(new maptilersdk.Popup({ closeOnClick: false }).setHTML(`
-            <div style="text-align:center; padding: 4px;">
-                <div style="font-weight: 800; font-size: 14px;">${name}</div>
-                <div style="font-size: 12px; color: #666; margin-top:2px;">${context}</div>
-            </div>
-        `))
-        .addTo(map);
-    
-    destinationMarker.togglePopup();
-    document.getElementById('bottom-action-bar').style.display = 'flex';
-    document.getElementById('address-preview-text').innerText = name;
-    document.getElementById('input-dest').value = `${name}, ${context}`;
-    document.getElementById('lat-dest').value = lat;
-    document.getElementById('lng-dest').value = lng;
-}
-
-function openFullPanel() {
-    document.getElementById('simple-search-bar').style.display = 'none';
-    document.getElementById('bottom-action-bar').style.display = 'none';
-    document.getElementById('full-search-panel').style.display = 'block';
-    if (destinationMarker) destinationMarker.togglePopup();
-}
-
-// Funkcja rysująca listę wyników
+// Funkcja rysująca listę wyników z dodanym podglądem źródła i ikonami
 function renderSimpleDropdown(results, dropdown, inputEl) {
     dropdown.innerHTML = '';
     results.forEach(r => {
         const icon = r.isPOI ? "🏢" : "📍"; // Budynek dla firm, pinezka dla ulic i miast
         const item = document.createElement('div');
         item.className = 'autocomplete-item';
-        
-        item.innerHTML = `<strong>${icon} ${r.name}</strong> <span style="font-size: 10px; color: #888;">[${r.source}]</span><br><small>${r.context}</small>`;
-        
+        // Wyświetlamy mały, szary tekst np. [OSM (Darmowe)] żebyś wiedział, kto odpowiedział
+        item.innerHTML = `<strong>${icon} ${r.name}</strong> <span style="font-size: 10px; color: #888; margin-left: 5px;">[${r.source}]</span><br><small>${r.context}</small>`;
+
         item.onclick = () => {
             inputEl.value = r.name;
             dropdown.style.display = 'none';
             dropPinAndShowAction(r.lat, r.lng, r.name, r.context);
-        };
-        dropdown.appendChild(item);
-    });
-    dropdown.style.display = 'block';
-}
-
-function dropPinAndShowAction(lat, lng, name, context) {
-    map.flyTo({ center: [lng, lat], zoom: 15.5, pitch: 45 });
-    if (destinationMarker) destinationMarker.remove();
-
-    destinationMarker = new maptilersdk.Marker({ color: "#ef4444" })
-        .setLngLat([lng, lat])
-        .setPopup(new maptilersdk.Popup({ closeOnClick: false }).setHTML(`
-            <div style="text-align:center; padding: 4px;">
-                <div style="font-weight: 800; font-size: 14px;">${name}</div>
-                <div style="font-size: 12px; color: #666; margin-top:2px;">${context}</div>
-            </div>
-        `))
-        .addTo(map);
-    
-    destinationMarker.togglePopup();
-    document.getElementById('bottom-action-bar').style.display = 'flex';
-    document.getElementById('address-preview-text').innerText = name;
-    document.getElementById('input-dest').value = `${name}, ${context}`;
-    document.getElementById('lat-dest').value = lat;
-    document.getElementById('lng-dest').value = lng;
-}
-
-function openFullPanel() {
-    document.getElementById('simple-search-bar').style.display = 'none';
-    document.getElementById('bottom-action-bar').style.display = 'none';
-    document.getElementById('full-search-panel').style.display = 'block';
-    if (destinationMarker) destinationMarker.togglePopup();
-}
-
-// Funkcja rysująca listę wyników z dodanym podglądem źródła
-function renderSimpleDropdown(results, dropdown, inputEl) {
-    dropdown.innerHTML = '';
-    results.forEach(res => {
-        const item = document.createElement('div');
-        item.className = 'autocomplete-item';
-        // Wyświetlamy mały, szary tekst np. [OSM (Darmowe)] żebyś wiedział, kto odpowiedział
-        item.innerHTML = `<strong>${res.name}</strong> <span style="font-size: 10px; color: #888; margin-left: 5px;">[${res.source}]</span><br><small>${res.context}</small>`;
-        item.onclick = () => {
-            inputEl.value = res.name;
-            dropdown.style.display = 'none';
-            dropPinAndShowAction(res.lat, res.lng, res.name, res.context);
         };
         dropdown.appendChild(item);
     });
@@ -626,7 +531,7 @@ function dropPinAndShowAction(lat, lng, name, context) {
             </div>
         `))
         .addTo(map);
-    
+
     destinationMarker.togglePopup();
 
     // 4. Pokazujemy dolny przycisk "Prowadź"
@@ -646,7 +551,7 @@ function openFullPanel() {
 
     // Otwieramy główny panel (wypełniony już współrzędnymi GPS na starcie i wybranym celem)
     document.getElementById('full-search-panel').style.display = 'block';
-    
+
     // Zamykamy dymek adresowy, żeby nie zasłaniał mapy podczas szukania trasy
     if (destinationMarker) destinationMarker.togglePopup();
 }
