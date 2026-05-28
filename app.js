@@ -1,6 +1,6 @@
 let map, currentUserLocation;
-const tomtomKey = "NV8IZgye8glN2QW5GtAHlFo11LAVS0G4";
-const maptilerKey = "SBcreDqKo6myDrCeUBGs";
+const tomtomKey = "";
+const maptilerKey = "";
 
 let restrictionMarkers = [];
 let currentRoutesData = null; // Przechowuje trasy wektorowe
