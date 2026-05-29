@@ -267,3 +267,114 @@ button.calc-btn:hover { background: #1557b0; transform: translateY(-1px); }
 .maplibregl-ctrl-top-right, .maptiler-ctrl-top-right {
     top: 85px !important;
 }
+
+/* ==========================================
+   NOWE: POI FILTER PANEL (LEWA STRONA)
+   ========================================== */
+.poi-panel-container {
+    position: absolute;
+    top: 85px; /* Poniżej paska wyszukiwania, na wysokości kontrolek po prawej */
+    left: 15px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.poi-toggle-btn {
+    background: rgba(255, 255, 255, 0.95);
+    border: 2px solid #1a73e8;
+    color: #1a73e8;
+    font-weight: 800;
+    font-size: 14px;
+    padding: 10px 16px;
+    border-radius: 30px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    cursor: pointer;
+    backdrop-filter: blur(5px);
+    transition: all 0.2s ease;
+}
+.poi-toggle-btn:hover { background: #1a73e8; color: white; }
+
+.poi-menu {
+    margin-top: 8px;
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 20px;
+    padding: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    backdrop-filter: blur(10px);
+    display: none; /* Domyślnie schowane */
+    flex-direction: column;
+    gap: 10px;
+    transition: all 0.3s ease;
+    opacity: 0;
+    transform: translateY(-10px);
+}
+
+.poi-menu.show {
+    display: flex;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.poi-filter-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+/* Okrągłe kółeczka typu toggle/radio-like zamiast kwadratowych checkboxów */
+.poi-checkbox {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    border: 2px solid #ccc;
+    border-radius: 50%;
+    outline: none;
+    cursor: pointer;
+    position: relative;
+    transition: 0.2s;
+    background: #fff;
+    flex-shrink: 0;
+}
+.poi-checkbox:checked {
+    background: #10b981;
+    border-color: #10b981;
+}
+.poi-checkbox:checked::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: white;
+}
+
+.poi-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: #4b5563;
+    cursor: pointer;
+    user-select: none;
+}
+
+/* Styl samych markerów na mapie */
+.osm-poi-marker {
+    background: #ffffff;
+    border: 3px solid #3b82f6;
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 14px;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    cursor: pointer;
+    z-index: 90; /* Poniżej znaków drogowych, które mają 100 */
+}

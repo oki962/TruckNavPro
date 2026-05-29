@@ -5,6 +5,7 @@ const maptilerKey = "SBcreDqKo6myDrCeUBGs";
 let restrictionMarkers = [];
 let currentRoutesData = null; // Przechowuje trasy wektorowe
 let routeTooltips = []; // Dymki dla tras
+let poiMarkers = []; // Markery POI (parkingi, stacje, mop)
 
 // =========================================================================
 // 1. PROFILE POJAZDÓW
@@ -46,7 +47,10 @@ function initMap() {
     // ZMIANA: Czekamy 800ms po zakończeniu przesuwania mapy, żeby nie zaspamować serwera
     map.on('moveend', () => {
         clearTimeout(overpassTimeout);
-        overpassTimeout = setTimeout(fetchRestrictions, 1500);
+        overpassTimeout = setTimeout(() => {
+            fetchRestrictions();
+            fetchPOIs();
+        }, 1500);
     });
 
     // Odczytywanie zapisanej trasy z LocalStorage przy starcie
@@ -608,3 +612,120 @@ function openFullPanel() {
 }
 
 window.onload = initMap;
+
+// =========================================================================
+// 8. OBSŁUGA POI Z OVERPASS API
+// =========================================================================
+
+function togglePoiMenu() {
+    document.getElementById('poi-menu').classList.toggle('show');
+}
+
+function updatePoiVisibility() {
+    const parkingEnabled = document.getElementById('poi-parking').checked;
+    const fuelEnabled = document.getElementById('poi-fuel').checked;
+    const mopEnabled = document.getElementById('poi-mop').checked;
+    const laybyEnabled = document.getElementById('poi-layby').checked;
+
+    poiMarkers.forEach(markerObj => {
+        const type = markerObj.poiType;
+        const el = markerObj.marker.getElement();
+
+        let isVisible = false;
+        if (type === 'parking' && parkingEnabled) isVisible = true;
+        if (type === 'fuel' && fuelEnabled) isVisible = true;
+        if (type === 'mop' && mopEnabled) isVisible = true;
+        if (type === 'layby' && laybyEnabled) isVisible = true;
+
+        el.style.display = isVisible ? 'flex' : 'none';
+    });
+}
+
+async function fetchPOIs() {
+    if (map.getZoom() < 13) {
+        poiMarkers.forEach(m => m.marker.remove());
+        poiMarkers = [];
+        return;
+    }
+
+    const parkingEnabled = document.getElementById('poi-parking').checked;
+    const fuelEnabled = document.getElementById('poi-fuel').checked;
+    const mopEnabled = document.getElementById('poi-mop').checked;
+    const laybyEnabled = document.getElementById('poi-layby').checked;
+
+    if (!parkingEnabled && !fuelEnabled && !mopEnabled && !laybyEnabled) {
+        // Jeśli wszystko jest odznaczone, ukrywamy je po stronie klienta (nie ma potrzeby ubijać zapytań zupełnie)
+        // Ale możemy zaoszczędzić request:
+        poiMarkers.forEach(m => m.marker.remove());
+        poiMarkers = [];
+        return;
+    }
+
+    const bounds = map.getBounds();
+    const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
+
+    let filters = [];
+    if (parkingEnabled) filters.push(`node["amenity"="parking"](${bbox});way["amenity"="parking"](${bbox});`);
+    if (fuelEnabled) filters.push(`node["amenity"="fuel"](${bbox});way["amenity"="fuel"](${bbox});`);
+    if (mopEnabled) filters.push(`node["highway"~"rest_area|services"](${bbox});way["highway"~"rest_area|services"](${bbox});`);
+    if (laybyEnabled) filters.push(`node["highway"="layby"](${bbox});way["highway"="layby"](${bbox});`);
+
+    const query = `[out:json][timeout:5];(${filters.join('')});out center;`;
+    const url = `https://lz4.overpass-api.de/api/interpreter`;
+
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `data=${encodeURIComponent(query)}`
+        });
+
+        if (res.status === 429) return;
+        if (!res.ok) throw new Error("HTTP status: " + res.status);
+
+        const data = await res.json();
+
+        // Czyszczenie poprzednich
+        poiMarkers.forEach(m => m.marker.remove());
+        poiMarkers = [];
+
+        data.elements.forEach(el => {
+            const lat = el.lat || (el.center && el.center.lat);
+            const lon = el.lon || (el.center && el.center.lon);
+            if (!lat || !lon) return;
+
+            let icon = "📍";
+            const tags = el.tags || {};
+
+            if (tags.amenity === "parking") icon = "🅿️";
+            else if (tags.amenity === "fuel") icon = "⛽";
+            else if (tags.highway === "rest_area" || tags.highway === "services") icon = "☕";
+            else if (tags.highway === "layby") icon = "🛣️";
+
+            const elDiv = document.createElement('div');
+            elDiv.className = 'osm-poi-marker';
+            elDiv.innerHTML = icon;
+            elDiv.onclick = (e) => {
+                e.stopPropagation();
+                dropPinAndShowAction(lat, lon, tags.name || "Brak nazwy (POI)", (tags.amenity || tags.highway));
+            };
+
+            const marker = new maptilersdk.Marker({ element: elDiv }).setLngLat([lon, lat]).addTo(map);
+
+            // Określenie typu dla client-side filteringu
+            let poiType = "";
+            if (tags.amenity === "parking") poiType = "parking";
+            else if (tags.amenity === "fuel") poiType = "fuel";
+            else if (tags.highway === "rest_area" || tags.highway === "services") poiType = "mop";
+            else if (tags.highway === "layby") poiType = "layby";
+
+            poiMarkers.push({ marker: marker, poiType: poiType });
+        });
+
+        // Po załadowaniu nowych markerów od razu stosujemy na nich obecny stan filtrów
+        updatePoiVisibility();
+
+    } catch (e) {
+        console.warn("Błąd pobierania POI z Overpass:", e);
+    }
+}
