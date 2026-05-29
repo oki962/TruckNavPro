@@ -415,6 +415,9 @@ async function calculateRoute() {
             const bounds = new maptilersdk.LngLatBounds();
             currentRoutesData.features[0].geometry.coordinates.forEach(c => bounds.extend(c));
             map.fitBounds(bounds, { padding: 50 });
+
+            // Trasa gotowa - Pokaż przycisk Start Nav
+            document.getElementById('start-drive-btn').style.display = 'block';
         }
     } catch (e) { alert("Wystąpił problem z wyznaczeniem trasy."); }
     finally { document.getElementById('calc-btn-text').innerText = "Wyznacz trasę"; }
@@ -728,4 +731,88 @@ async function fetchPOIs() {
     } catch (e) {
         console.warn("Błąd pobierania POI z Overpass:", e);
     }
+}
+
+// =========================================================================
+// 9. TRYB JAZDY NA ŻYWO (GPS WATCH, OBRÓT, PITCH)
+// =========================================================================
+let watchId = null;
+let driverMarker = null;
+
+function startNavigation() {
+    if (!navigator.geolocation) {
+        alert("Twoje urządzenie nie obsługuje geolokalizacji.");
+        return;
+    }
+
+    // Zamykanie i ukrywanie zbędnych paneli
+    document.getElementById('full-search-panel').style.display = 'none';
+    document.getElementById('simple-search-bar').style.display = 'none';
+
+    // Pokaż przycisk zatrzymania nawigacji
+    document.getElementById('stop-drive-btn').style.display = 'block';
+
+    // Przekształcanie mapy w widok jazdy 3D
+    map.setPitch(60);
+    map.setZoom(17.5);
+
+    // Stworzenie dedykowanego markera (Niebieska strzałka nawigacyjna)
+    if (driverMarker) driverMarker.remove();
+    const elDiv = document.createElement('div');
+    elDiv.className = 'truck-nav-marker';
+    elDiv.innerHTML = "⬆"; // Strzałka kierunkowa
+    driverMarker = new maptilersdk.Marker({ element: elDiv, pitchAlignment: 'map' })
+        .setLngLat([currentUserLocation?.lng || 19.0, currentUserLocation?.lat || 50.0])
+        .addTo(map);
+
+    // Włączenie ciągłego strumienia GPS
+    watchId = navigator.geolocation.watchPosition((position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const heading = position.coords.heading; // Opcjonalne: kompas (jeśli urządzenie ma i jedziemy)
+
+        currentUserLocation = { lat, lng };
+
+        // Zaktualizuj fizyczną pozycję na mapie
+        driverMarker.setLngLat([lng, lat]);
+
+        // Zaktualizuj pozycję "kamery" płynnie nad podążającą ciężarówką
+        map.easeTo({
+            center: [lng, lat],
+            bearing: heading !== null && !isNaN(heading) ? heading : map.getBearing(),
+            duration: 800, // Synchronizacja z update GPS ~1s
+            easing: (t) => t // Liniowy przeskok, żeby nie skakało
+        });
+
+    }, (error) => {
+        console.warn("GPS zablokowany lub zgubiony sygnał", error);
+    }, {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 5000
+    });
+}
+
+function stopNavigation() {
+    if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+    }
+
+    if (driverMarker) {
+        driverMarker.remove();
+        driverMarker = null;
+    }
+
+    // Powrót do widoku płaskiego "Z lotu ptaka" z północą
+    map.easeTo({
+        pitch: 0,
+        bearing: 0,
+        zoom: 14.5,
+        duration: 1000
+    });
+
+    // Przywrócenie interfejsu
+    document.getElementById('stop-drive-btn').style.display = 'none';
+    document.getElementById('full-search-panel').style.display = 'block';
 }
