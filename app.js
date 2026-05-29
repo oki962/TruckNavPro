@@ -297,9 +297,12 @@ function autoFillSpecs() { const s = defaultSpecs[document.getElementById('v-typ
 // =========================================================================
 // 6. ROUTING TOMTOM (Wersja wektorowa z klikalnymi alternatywami i dymkami)
 // =========================================================================
-async function calculateRoute() {
+async function calculateRoute(isBackground = false) {
     const p = profiles[activeProfileIdx];
-    if (!p.isConfigured) return alert("Skonfiguruj pojazd w ustawieniach!");
+    if (!p.isConfigured) {
+        if (!isBackground) alert("Skonfiguruj pojazd w ustawieniach!");
+        return;
+    }
 
     const routePointsElements = Array.from(document.querySelectorAll('#sortable-route-list .route-point'));
     const points = routePointsElements.map(pt => {
@@ -307,7 +310,10 @@ async function calculateRoute() {
         return (lat && lng) ? `${lat},${lng}` : null;
     }).filter(Boolean);
 
-    if (points.length < 2) return alert("Wybierz poprawnie lokalizacje.");
+    if (points.length < 2) {
+        if (!isBackground) alert("Wybierz poprawnie lokalizacje.");
+        return;
+    }
 
     // Zapisujemy trasę (Start i Cel) w pamięci urządzenia (LocalStorage)
     try {
@@ -339,7 +345,7 @@ async function calculateRoute() {
     if(p.adrTunnel) dims += `&vehicleAdrcTunnelRestrictionCode=${p.adrTunnel}`;
 
     try {
-        document.getElementById('calc-btn-text').innerText = "Szukam trasy...";
+        if (!isBackground) document.getElementById('calc-btn-text').innerText = "Szukam trasy...";
         const response = await fetch('/api/route', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -408,19 +414,26 @@ async function calculateRoute() {
                 });
             }
 
-            renderRouteTooltips();
+            if (!isBackground) {
+                renderRouteTooltips();
+
+                // Centrowanie mapy tylko, gdy nie jedziemy (nie w tle)
+                const bounds = new maptilersdk.LngLatBounds();
+                currentRoutesData.features[0].geometry.coordinates.forEach(c => bounds.extend(c));
+                map.fitBounds(bounds, { padding: 50 });
+
+                document.getElementById('start-drive-btn').style.display = 'block';
+            } else {
+                // Gdy jesteśmy w tle usuwamy stare dymki z poprzedniej trasy jeśli były
+                routeTooltips.forEach(t => t.remove());
+                routeTooltips = [];
+            }
+
+            // Ale telemetrię odświeżamy zawsze
             updateTelemetryPanel(currentRoutesData.features[0].properties);
-
-            // Centrowanie mapy
-            const bounds = new maptilersdk.LngLatBounds();
-            currentRoutesData.features[0].geometry.coordinates.forEach(c => bounds.extend(c));
-            map.fitBounds(bounds, { padding: 50 });
-
-            // Trasa gotowa - Pokaż przycisk Start Nav
-            document.getElementById('start-drive-btn').style.display = 'block';
         }
-    } catch (e) { alert("Wystąpił problem z wyznaczeniem trasy."); }
-    finally { document.getElementById('calc-btn-text').innerText = "Wyznacz trasę"; }
+    } catch (e) { if (!isBackground) alert("Wystąpił problem z wyznaczeniem trasy."); }
+    finally { if (!isBackground) document.getElementById('calc-btn-text').innerText = "Wyznacz trasę"; }
 }
 
 function renderRouteTooltips() {
@@ -738,6 +751,7 @@ async function fetchPOIs() {
 // =========================================================================
 let watchId = null;
 let driverMarker = null;
+let lastRouteCalcTime = 0;
 
 function startNavigation() {
     if (!navigator.geolocation) {
@@ -748,6 +762,7 @@ function startNavigation() {
     // Zamykanie i ukrywanie zbędnych paneli
     document.getElementById('full-search-panel').style.display = 'none';
     document.getElementById('simple-search-bar').style.display = 'none';
+    document.getElementById('start-drive-btn').style.display = 'none'; // Ukryj przycisk po wejściu w tryb
 
     // Pokaż przycisk zatrzymania nawigacji
     document.getElementById('stop-drive-btn').style.display = 'block';
@@ -760,8 +775,12 @@ function startNavigation() {
     if (driverMarker) driverMarker.remove();
     const elDiv = document.createElement('div');
     elDiv.className = 'truck-nav-marker';
+    // Zapobieganie przechwytywaniu eventów przez marker (aby nie kleił się do palca przy przeciąganiu)
+    elDiv.style.pointerEvents = 'none';
     elDiv.innerHTML = "⬆"; // Strzałka kierunkowa
-    driverMarker = new maptilersdk.Marker({ element: elDiv, pitchAlignment: 'map' })
+
+    // Marker wyłączony z obsługi myszki
+    driverMarker = new maptilersdk.Marker({ element: elDiv, pitchAlignment: 'map', interactive: false })
         .setLngLat([currentUserLocation?.lng || 19.0, currentUserLocation?.lat || 50.0])
         .addTo(map);
 
@@ -783,6 +802,21 @@ function startNavigation() {
             duration: 800, // Synchronizacja z update GPS ~1s
             easing: (t) => t // Liniowy przeskok, żeby nie skakało
         });
+
+        // --- LOGIKA REROUTINGU ---
+        // Aktualizuj trasę z obecnej pozycji maksimum raz na 10 sekund
+        const now = Date.now();
+        if (now - lastRouteCalcTime > 10000) {
+            lastRouteCalcTime = now;
+
+            // Podmień wartości w ukrytym formularzu startowym na nasz bieżący GPS
+            document.getElementById('input-start').value = "📍 Aktualna Pozycja";
+            document.getElementById('lat-start').value = lat;
+            document.getElementById('lng-start').value = lng;
+
+            // Przelicz trasę na nowo w tle, cel pozostaje bez zmian
+            calculateRoute(true);
+        }
 
     }, (error) => {
         console.warn("GPS zablokowany lub zgubiony sygnał", error);
