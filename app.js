@@ -49,7 +49,33 @@ function initMap() {
         overpassTimeout = setTimeout(fetchRestrictions, 1500);
     });
 
-    if (navigator.geolocation) {
+    // Odczytywanie zapisanej trasy z LocalStorage przy starcie
+    let routeRestored = false;
+    try {
+        const savedRouteStr = localStorage.getItem('trucknav_last_route');
+        if (savedRouteStr) {
+            const savedRoute = JSON.parse(savedRouteStr);
+            if (savedRoute && savedRoute.start && savedRoute.dest) {
+                // Wypełnianie pól formularza
+                document.getElementById('input-start').value = savedRoute.start.name;
+                document.getElementById('lat-start').value = savedRoute.start.lat;
+                document.getElementById('lng-start').value = savedRoute.start.lng;
+
+                document.getElementById('input-dest').value = savedRoute.dest.name;
+                document.getElementById('lat-dest').value = savedRoute.dest.lat;
+                document.getElementById('lng-dest').value = savedRoute.dest.lng;
+
+                // Automatyczne otwarcie panelu i wyznaczenie trasy
+                openFullPanel();
+                setTimeout(() => { calculateRoute(); }, 500); // Małe opóźnienie na upewnienie się, że obiekty się wyrenderowały
+                routeRestored = true;
+            }
+        }
+    } catch (e) {
+        console.warn("Błąd odczytu z LocalStorage", e);
+    }
+
+    if (navigator.geolocation && !routeRestored) {
         navigator.geolocation.getCurrentPosition(position => {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
@@ -271,12 +297,36 @@ async function calculateRoute() {
     const p = profiles[activeProfileIdx];
     if (!p.isConfigured) return alert("Skonfiguruj pojazd w ustawieniach!");
 
-    const points = Array.from(document.querySelectorAll('#sortable-route-list .route-point')).map(pt => {
+    const routePointsElements = Array.from(document.querySelectorAll('#sortable-route-list .route-point'));
+    const points = routePointsElements.map(pt => {
         const lat = pt.querySelector('.lat-val').value, lng = pt.querySelector('.lng-val').value;
         return (lat && lng) ? `${lat},${lng}` : null;
     }).filter(Boolean);
 
     if (points.length < 2) return alert("Wybierz poprawnie lokalizacje.");
+
+    // Zapisujemy trasę (Start i Cel) w pamięci urządzenia (LocalStorage)
+    try {
+        const startEl = routePointsElements[0];
+        const destEl = routePointsElements[routePointsElements.length - 1];
+
+        const startData = {
+            name: startEl.querySelector('.place-input').value,
+            lat: startEl.querySelector('.lat-val').value,
+            lng: startEl.querySelector('.lng-val').value
+        };
+        const destData = {
+            name: destEl.querySelector('.place-input').value,
+            lat: destEl.querySelector('.lat-val').value,
+            lng: destEl.querySelector('.lng-val').value
+        };
+
+        if (startData.lat && destData.lat) {
+            localStorage.setItem('trucknav_last_route', JSON.stringify({ start: startData, dest: destData }));
+        }
+    } catch (e) {
+        console.warn("Błąd zapisu do LocalStorage", e);
+    }
 
     let travelMode = (p.type === "bus" || p.type === "van") ? p.type : "truck";
     let dims = `&vehicleWeight=${p.w*1000}&vehicleAxleWeight=${p.aw*1000}&vehicleLength=${p.l}&vehicleWidth=${p.wid}&vehicleHeight=${p.h}&vehicleMaxSpeed=${p.speed}`;
