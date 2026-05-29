@@ -838,15 +838,25 @@ function startNavigation() {
         return;
     }
 
-    // Zamykanie i ukrywanie wszystkich paneli z poziomu nawigacji (dopiero po kliknieciu Zacznij jazde)
+    // Zamykanie i ukrywanie wszystkich paneli z poziomu nawigacji
     document.getElementById('full-search-panel').style.display = 'none';
     document.getElementById('simple-search-bar').style.display = 'none';
     document.getElementById('poi-panel-container').style.display = 'none';
-    document.getElementById('start-drive-btn').style.display = 'none'; // Ukryj przycisk po wejściu w tryb
+    document.getElementById('start-drive-btn').style.display = 'none';
     document.getElementById('exit-routing-btn').style.display = 'none';
 
     // Pokaż przycisk zatrzymania nawigacji
     document.getElementById('stop-drive-btn').style.display = 'block';
+
+    // Usunięcie alternatywnych tras - pozostawienie tylko wybranej
+    if (currentRoutesData && map.getSource('routes')) {
+        currentRoutesData.features = currentRoutesData.features.filter(f => f.properties.isMain);
+        map.getSource('routes').setData(currentRoutesData);
+    }
+
+    // Usunięcie dymków (tooltipów) z czasami
+    routeTooltips.forEach(t => t.remove());
+    routeTooltips = [];
 
     // Przekształcanie mapy w widok jazdy 3D z lepszą perspektywą kierowcy
     map.setPitch(55);
@@ -931,12 +941,24 @@ function stopNavigation() {
         duration: 1000
     });
 
-    // Przywrócenie interfejsu
+    // Przywrócenie interfejsu i stanu
     isUserPanning = false;
     document.getElementById('recenter-btn').style.display = 'none';
     document.getElementById('stop-drive-btn').style.display = 'none';
 
-    // Pokaż powrót i panel jeśli nadal tu jesteśmy
-    document.getElementById('full-search-panel').style.display = 'block';
-    document.getElementById('exit-routing-btn').style.display = 'block';
+    // Użytkownik zakończył jazdę. Ukrywamy zaawansowane panele i zwracamy ekran startowy
+    document.getElementById('full-search-panel').style.display = 'none';
+    document.getElementById('exit-routing-btn').style.display = 'none';
+    document.getElementById('telemetry-panel').style.display = 'none';
+
+    document.getElementById('simple-search-bar').style.display = 'block';
+    document.getElementById('poi-panel-container').style.display = 'flex';
+
+    // Usuń trasę z mapy, aby zachować czysty widok po skończeniu jazdy
+    if (map.getSource('routes')) {
+        if (map.getLayer('routes-line')) map.removeLayer('routes-line');
+        if (map.getLayer('routes-click')) map.removeLayer('routes-click');
+        map.removeSource('routes');
+        currentRoutesData = null;
+    }
 }
