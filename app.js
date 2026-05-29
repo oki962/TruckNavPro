@@ -77,9 +77,10 @@ function initMap() {
                 document.getElementById('lat-dest').value = savedRoute.dest.lat;
                 document.getElementById('lng-dest').value = savedRoute.dest.lng;
 
-                // Automatyczne otwarcie panelu i wyznaczenie trasy
+                // Otwieramy panel tras (który teraz nie ukrywa głównego paska wyszukiwarki)
                 openFullPanel();
-                setTimeout(() => { calculateRoute(); }, 500); // Małe opóźnienie na upewnienie się, że obiekty się wyrenderowały
+                setTimeout(() => { calculateRoute(); }, 500);
+
                 routeRestored = true;
             }
         }
@@ -87,15 +88,19 @@ function initMap() {
         console.warn("Błąd odczytu z LocalStorage", e);
     }
 
-    if (navigator.geolocation && !routeRestored) {
+    if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(position => {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
             currentUserLocation = { lat, lng };
-            map.flyTo({ center: [lng, lat], zoom: 14.5 });
-            document.getElementById('input-start').value = "📍 Twoja lokalizacja";
-            document.getElementById('lat-start').value = lat;
-            document.getElementById('lng-start').value = lng;
+
+            // Jeśli nie przywróciliśmy trasy, używamy GPS-u jako punkt startowy i centrum
+            if (!routeRestored) {
+                map.flyTo({ center: [lng, lat], zoom: 14.5 });
+                document.getElementById('input-start').value = "📍 Twoja lokalizacja";
+                document.getElementById('lat-start').value = lat;
+                document.getElementById('lng-start').value = lng;
+            }
         }, () => console.log("Brak GPS."));
     }
 }
@@ -627,16 +632,14 @@ function dropPinAndShowAction(lat, lng, name, context) {
 }
 
 function openFullPanel() {
-    // Ukrywamy czysty interfejs
-    document.getElementById('simple-search-bar').style.display = 'none';
+    // Ukrywamy tylko dolny pasek "Prowadź" (jeśli był widoczny) i okno wyszukiwarki pozostawiamy ZAWSZE widoczne dopóki nie zacznie się jazda
     document.getElementById('bottom-action-bar').style.display = 'none';
-    document.getElementById('poi-panel-container').style.display = 'none';
 
-    // Otwieramy główny panel oraz powrót
+    // Otwieramy główny panel (wybór pojazdu/trasowanie) pod wyszukiwarką
     document.getElementById('full-search-panel').style.display = 'block';
     document.getElementById('exit-routing-btn').style.display = 'block';
 
-    // Zamykamy dymek adresowy
+    // Zamykamy dymek adresowy z mapy
     if (destinationMarker) destinationMarker.togglePopup();
 }
 
@@ -837,9 +840,10 @@ function startNavigation() {
         return;
     }
 
-    // Zamykanie i ukrywanie zbędnych paneli
+    // Zamykanie i ukrywanie wszystkich paneli z poziomu nawigacji (dopiero po kliknieciu Zacznij jazde)
     document.getElementById('full-search-panel').style.display = 'none';
     document.getElementById('simple-search-bar').style.display = 'none';
+    document.getElementById('poi-panel-container').style.display = 'none';
     document.getElementById('start-drive-btn').style.display = 'none'; // Ukryj przycisk po wejściu w tryb
     document.getElementById('exit-routing-btn').style.display = 'none';
 
