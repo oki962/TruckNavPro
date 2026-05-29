@@ -6,7 +6,7 @@
     <title>TruckNav Pro</title>
     <script src="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.umd.min.js"></script>
     <link href="https://cdn.maptiler.com/maptiler-sdk-js/v2.0.3/maptiler-sdk.css" rel="stylesheet" />
-    <link rel="stylesheet" href="style.css?v=5">
+    <link rel="stylesheet" href="style.css?v=6">
 </head>
 
 <body>
@@ -55,6 +55,9 @@
 
     <!-- Pływający przycisk zakończenia nawigacji (Zakończ jazdę) -->
     <button class="stop-drive-btn" id="stop-drive-btn" onclick="stopNavigation()">🛑 Zakończ Jazdę</button>
+
+    <!-- Przycisk wyjścia (Powrót do ekranu startowego) -->
+    <button class="exit-routing-btn" id="exit-routing-btn" onclick="exitRouting()">✖ Powrót</button>
 
     <div class="modal-overlay" id="settings-modal">
         <div class="modal-content">
@@ -177,6 +180,6 @@
     <div id="map"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
-    <script src="app.js?v=5"></script>
+    <script src="app.js?v=6"></script>
 </body>
 </html>

@@ -462,3 +462,27 @@ button.calc-btn:hover { background: #1557b0; transform: translateY(-1px); }
     background: #1a73e8;
     color: white;
 }
+
+.exit-routing-btn {
+    position: absolute;
+    top: 15px;
+    left: 15px;
+    background: rgba(255, 255, 255, 0.95);
+    color: #ef4444;
+    border: 2px solid #ef4444;
+    border-radius: 30px;
+    padding: 10px 16px;
+    font-weight: 800;
+    font-size: 14px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 2000;
+    cursor: pointer;
+    display: none; /* Domyślnie schowane */
+    backdrop-filter: blur(5px);
+    transition: all 0.2s ease;
+}
+
+.exit-routing-btn:hover {
+    background: #ef4444;
+    color: white;
+}

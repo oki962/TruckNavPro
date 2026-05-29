@@ -404,8 +404,11 @@ async function calculateRoute(isBackground = false) {
                     id: 'routes-line', type: 'line', source: 'routes',
                     layout: { 'line-join': 'round', 'line-cap': 'round' },
                     paint: {
-                        'line-color': ['case', ['boolean', ['get', 'isMain'], false], '#1a73e8', '#808080'],
-                        'line-width': ['case', ['boolean', ['get', 'isMain'], false], 7, 5],
+                        'line-color': ['case', ['boolean', ['get', 'isMain'], false], '#555555', '#9ca3af'],
+                        'line-width': ['case', ['boolean', ['get', 'isMain'], false],
+                            ['interpolate', ['linear'], ['zoom'], 10, 6, 18, 14],
+                            ['interpolate', ['linear'], ['zoom'], 10, 4, 18, 8]
+                        ],
                         'line-opacity': ['case', ['boolean', ['get', 'isMain'], false], 1.0, 0.6]
                     }
                 });
@@ -627,12 +630,45 @@ function openFullPanel() {
     // Ukrywamy czysty interfejs
     document.getElementById('simple-search-bar').style.display = 'none';
     document.getElementById('bottom-action-bar').style.display = 'none';
+    document.getElementById('poi-panel-container').style.display = 'none';
 
-    // Otwieramy główny panel (wypełniony już współrzędnymi GPS na starcie i wybranym celem)
+    // Otwieramy główny panel oraz powrót
     document.getElementById('full-search-panel').style.display = 'block';
+    document.getElementById('exit-routing-btn').style.display = 'block';
 
-    // Zamykamy dymek adresowy, żeby nie zasłaniał mapy podczas szukania trasy
+    // Zamykamy dymek adresowy
     if (destinationMarker) destinationMarker.togglePopup();
+}
+
+function exitRouting() {
+    // Zatrzymaj jeśli jedziemy
+    stopNavigation();
+
+    // Usuwanie warstw na mapie
+    if (map.getSource('routes')) {
+        if (map.getLayer('routes-line')) map.removeLayer('routes-line');
+        if (map.getLayer('routes-click')) map.removeLayer('routes-click');
+        map.removeSource('routes');
+    }
+
+    currentRoutesData = null;
+    routeTooltips.forEach(t => t.remove());
+    routeTooltips = [];
+
+    // Zresetuj UI
+    document.getElementById('full-search-panel').style.display = 'none';
+    document.getElementById('exit-routing-btn').style.display = 'none';
+    document.getElementById('telemetry-panel').style.display = 'none';
+    document.getElementById('start-drive-btn').style.display = 'none';
+
+    // Przywróć wyszukiwarki
+    document.getElementById('simple-search-bar').style.display = 'block';
+    document.getElementById('poi-panel-container').style.display = 'flex';
+
+    // Wyśrodkuj na GPS
+    if (currentUserLocation) {
+        map.flyTo({ center: [currentUserLocation.lng, currentUserLocation.lat], zoom: 14.5, pitch: 45, duration: 1500 });
+    }
 }
 
 window.onload = initMap;
@@ -766,8 +802,33 @@ function recenterMap() {
     isUserPanning = false;
     document.getElementById('recenter-btn').style.display = 'none';
     if (currentUserLocation) {
-        map.flyTo({ center: [currentUserLocation.lng, currentUserLocation.lat], zoom: 17.5, duration: 800 });
+        map.flyTo({ center: [currentUserLocation.lng, currentUserLocation.lat], zoom: 15.5, pitch: 55, duration: 800 });
     }
+}
+
+// Funkcja animująca marker w Vanilla JS (Płynna interpolacja pomiędzy koordynatami)
+let animationFrameId = null;
+function animateMarker(marker, startLngLat, endLngLat, duration) {
+    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+
+    const startTime = performance.now();
+    const [startLng, startLat] = startLngLat;
+    const [endLng, endLat] = endLngLat;
+
+    function animate(time) {
+        let timeFraction = (time - startTime) / duration;
+        if (timeFraction > 1) timeFraction = 1;
+
+        const currentLng = startLng + (endLng - startLng) * timeFraction;
+        const currentLat = startLat + (endLat - startLat) * timeFraction;
+
+        marker.setLngLat([currentLng, currentLat]);
+
+        if (timeFraction < 1) {
+            animationFrameId = requestAnimationFrame(animate);
+        }
+    }
+    animationFrameId = requestAnimationFrame(animate);
 }
 
 function startNavigation() {
@@ -780,13 +841,14 @@ function startNavigation() {
     document.getElementById('full-search-panel').style.display = 'none';
     document.getElementById('simple-search-bar').style.display = 'none';
     document.getElementById('start-drive-btn').style.display = 'none'; // Ukryj przycisk po wejściu w tryb
+    document.getElementById('exit-routing-btn').style.display = 'none';
 
     // Pokaż przycisk zatrzymania nawigacji
     document.getElementById('stop-drive-btn').style.display = 'block';
 
-    // Przekształcanie mapy w widok jazdy 3D
-    map.setPitch(60);
-    map.setZoom(17.5);
+    // Przekształcanie mapy w widok jazdy 3D z lepszą perspektywą kierowcy
+    map.setPitch(55);
+    map.setZoom(15.5);
 
     // Stworzenie dedykowanego markera (Niebieska strzałka nawigacyjna)
     if (driverMarker) driverMarker.remove();
@@ -804,17 +866,22 @@ function startNavigation() {
         const lng = position.coords.longitude;
         const heading = position.coords.heading; // Opcjonalne: kompas (jeśli urządzenie ma i jedziemy)
 
+        const prevLocation = currentUserLocation;
         currentUserLocation = { lat, lng };
 
-        // Zaktualizuj fizyczną pozycję na mapie (Zawsze)
-        driverMarker.setLngLat([lng, lat]);
+        // Zaktualizuj fizyczną pozycję na mapie bardzo płynnie (Interpolacja JS)
+        if (prevLocation && prevLocation.lat && prevLocation.lng) {
+            animateMarker(driverMarker, [prevLocation.lng, prevLocation.lat], [lng, lat], 1000); // 1000ms duration
+        } else {
+            driverMarker.setLngLat([lng, lat]);
+        }
 
         // Zaktualizuj pozycję kamery tylko jeśli kierowca sam nie przegląda teraz mapy
         if (!isUserPanning) {
             map.easeTo({
                 center: [lng, lat],
                 bearing: heading !== null && !isNaN(heading) ? heading : map.getBearing(),
-                duration: 800,
+                duration: 1000,
                 easing: (t) => t
             });
         }
@@ -866,5 +933,8 @@ function stopNavigation() {
     isUserPanning = false;
     document.getElementById('recenter-btn').style.display = 'none';
     document.getElementById('stop-drive-btn').style.display = 'none';
+
+    // Pokaż powrót i panel jeśli nadal tu jesteśmy
     document.getElementById('full-search-panel').style.display = 'block';
+    document.getElementById('exit-routing-btn').style.display = 'block';
 }
