@@ -409,11 +409,8 @@ async function calculateRoute(isBackground = false) {
                     id: 'routes-line', type: 'line', source: 'routes',
                     layout: { 'line-join': 'round', 'line-cap': 'round' },
                     paint: {
-                        'line-color': ['case', ['boolean', ['get', 'isMain'], false], '#555555', '#9ca3af'],
-                        'line-width': ['case', ['boolean', ['get', 'isMain'], false],
-                            ['interpolate', ['linear'], ['zoom'], 10, 6, 18, 14],
-                            ['interpolate', ['linear'], ['zoom'], 10, 4, 18, 8]
-                        ],
+                        'line-color': ['case', ['boolean', ['get', 'isMain'], false], '#4A4A4A', '#9ca3af'],
+                        'line-width': ['case', ['boolean', ['get', 'isMain'], false], 10, 6],
                         'line-opacity': ['case', ['boolean', ['get', 'isMain'], false], 1.0, 0.6]
                     }
                 });
@@ -438,7 +435,9 @@ async function calculateRoute(isBackground = false) {
                 currentRoutesData.features[0].geometry.coordinates.forEach(c => bounds.extend(c));
                 map.fitBounds(bounds, { padding: 50 });
 
+                // Pokaż przycisk Start Nav oraz Powrót tylko gdy wyliczamy nową trasę jako użytkownik
                 document.getElementById('start-drive-btn').style.display = 'block';
+                document.getElementById('exit-routing-btn').style.display = 'block';
             } else {
                 // Gdy jesteśmy w tle usuwamy stare dymki z poprzedniej trasy jeśli były
                 routeTooltips.forEach(t => t.remove());
@@ -637,7 +636,6 @@ function openFullPanel() {
 
     // Otwieramy główny panel (wybór pojazdu/trasowanie) pod wyszukiwarką
     document.getElementById('full-search-panel').style.display = 'block';
-    document.getElementById('exit-routing-btn').style.display = 'block';
 
     // Zamykamy dymek adresowy z mapy
     if (destinationMarker) destinationMarker.togglePopup();
