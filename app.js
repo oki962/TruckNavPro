@@ -208,7 +208,7 @@ function setupAutocomplete(inputId) {
 }
 
 function fallbackToTomTom(query, dropdown, inputEl, wrapper) {
-    fetch(`https://api.tomtom.com/search/2/search/${encodeURIComponent(query)}.json?key=${tomtomKey}&language=pl-PL&limit=5`).then(res => res.json()).then(data => {
+    fetch(`/api/search?q=${encodeURIComponent(query)}`).then(res => res.json()).then(data => {
         if (data.results && data.results.length > 0) {
             const formattedResults = data.results.map(r => ({ name: r.poi ? r.poi.name : (r.address.localName || r.address.freeformAddress), context: r.address.freeformAddress + (r.address.country ? `, ${r.address.country}` : ''), lat: r.position.lat, lng: r.position.lon }));
             renderDropdown(formattedResults, dropdown, inputEl, wrapper);
@@ -284,12 +284,13 @@ async function calculateRoute() {
     if(p.adrLoad) dims += `&vehicleLoadType=${p.adrLoad}`;
     if(p.adrTunnel) dims += `&vehicleAdrcTunnelRestrictionCode=${p.adrTunnel}`;
 
-    // UWAGA: maxAlternatives=2 zwraca aż 3 trasy
-    const url = `https://api.tomtom.com/routing/1/calculateRoute/${points.join(':')}/json?key=${tomtomKey}&travelMode=${travelMode}&vehicleCommercial=true${dims}&traffic=true&maxAlternatives=2`;
-
     try {
         document.getElementById('calc-btn-text').innerText = "Szukam trasy...";
-        const response = await fetch(url);
+        const response = await fetch('/api/route', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ points: points.join(':'), travelMode, dims })
+        });
         const data = await response.json();
 
         currentRoutesData = { type: 'FeatureCollection', features: [] };
@@ -465,7 +466,7 @@ function setupSimpleSearch(inputId) {
             })
             .catch(() => {
                 // 2. KASKADA: TOMTOM (1 płatne zapytanie)
-                const tomtomUrl = `https://api.tomtom.com/search/2/search/${encodeURIComponent(query)}.json?key=${tomtomKey}&language=pl-PL&limit=5&typeahead=true&lat=${center.lat}&lon=${center.lng}`;
+                const tomtomUrl = `/api/search?q=${encodeURIComponent(query)}&lat=${center.lat}&lon=${center.lng}`;
 
                 fetch(tomtomUrl)
                 .then(res => res.json())
