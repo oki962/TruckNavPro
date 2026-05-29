@@ -437,8 +437,6 @@ button.calc-btn:hover { background: #1557b0; transform: translateY(-1px); }
     align-items: center;
     font-size: 20px;
     z-index: 500;
-    /* Płynny przeskok animowany na ekranie dla lepszego feelingu 1 Hz GPS'a */
-    transition: transform 0.8s linear;
 }
 
 .recenter-btn {
