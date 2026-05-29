@@ -813,119 +813,73 @@ function recenterMap() {
     }
 }
 
-// Funkcja animująca marker w Vanilla JS (Płynna interpolacja pomiędzy koordynatami)
-let animationFrameId = null;
-function animateMarker(marker, startLngLat, endLngLat, duration) {
-    if (animationFrameId) cancelAnimationFrame(animationFrameId);
-
-    const startTime = performance.now();
-    const [startLng, startLat] = startLngLat;
-    const [endLng, endLat] = endLngLat;
-
-    function animate(time) {
-        let timeFraction = (time - startTime) / duration;
-        if (timeFraction > 1) timeFraction = 1;
-
-        const currentLng = startLng + (endLng - startLng) * timeFraction;
-        const currentLat = startLat + (endLat - startLat) * timeFraction;
-
-        marker.setLngLat([currentLng, currentLat]);
-
-        if (timeFraction < 1) {
-            animationFrameId = requestAnimationFrame(animate);
-        }
-    }
-    animationFrameId = requestAnimationFrame(animate);
-}
-
 function startNavigation() {
-    if (!navigator.geolocation) {
-        alert("Twoje urządzenie nie obsługuje geolokalizacji.");
-        return;
-    }
-
-    // Zamykanie i ukrywanie wszystkich paneli z poziomu nawigacji
+    // 1. Ukryj paski i alternatywne trasy (to co już masz)
     document.getElementById('full-search-panel').style.display = 'none';
     document.getElementById('simple-search-bar').style.display = 'none';
     document.getElementById('poi-panel-container').style.display = 'none';
     document.getElementById('start-drive-btn').style.display = 'none';
     document.getElementById('exit-routing-btn').style.display = 'none';
-
-    // Pokaż przycisk zatrzymania nawigacji
     document.getElementById('stop-drive-btn').style.display = 'block';
 
-    // Usunięcie alternatywnych tras - pozostawienie tylko wybranej
     if (currentRoutesData && map.getSource('routes')) {
         currentRoutesData.features = currentRoutesData.features.filter(f => f.properties.isMain);
         map.getSource('routes').setData(currentRoutesData);
     }
-
-    // Usunięcie dymków (tooltipów) z czasami
     routeTooltips.forEach(t => t.remove());
     routeTooltips = [];
 
-    // Przekształcanie mapy w widok jazdy 3D z lepszą perspektywą kierowcy
-    map.setPitch(55);
-    map.setZoom(15.5);
+    // 2. FIZYCZNIE przełącz mapę w tryb jazdy 3D
+    map.setPitch(55); // pochylenie mapy pod widok zza szyby
+    map.setZoom(14.5); // delikatne oddalenie, żeby kierowca widział drogę
 
-    // Stworzenie dedykowanego markera (Niebieska strzałka nawigacyjna)
     if (driverMarker) driverMarker.remove();
     const elDiv = document.createElement('div');
     elDiv.className = 'truck-nav-marker';
-    elDiv.innerHTML = "⬆"; // Strzałka kierunkowa
+    elDiv.innerHTML = "⬆";
+
+    // Bezpieczne wczytanie defaulta
+    const startLng = (currentUserLocation && currentUserLocation.lng) ? currentUserLocation.lng : 19.0;
+    const startLat = (currentUserLocation && currentUserLocation.lat) ? currentUserLocation.lat : 50.0;
 
     driverMarker = new maptilersdk.Marker({ element: elDiv, pitchAlignment: 'map' })
-        .setLngLat([currentUserLocation?.lng || 19.0, currentUserLocation?.lat || 50.0])
+        .setLngLat([startLng, startLat])
         .addTo(map);
 
-    // Włączenie ciągłego strumienia GPS
-    watchId = navigator.geolocation.watchPosition((position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        const heading = position.coords.heading; // Opcjonalne: kompas (jeśli urządzenie ma i jedziemy)
+    // 3. FIZYCZNIE odpal śledzenie GPS
+    if (navigator.geolocation) {
+        watchId = navigator.geolocation.watchPosition(function(position) {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            currentUserLocation = { lat, lng };
 
-        const prevLocation = currentUserLocation;
-        currentUserLocation = { lat, lng };
-
-        // Zaktualizuj fizyczną pozycję na mapie bardzo płynnie (Interpolacja JS)
-        if (prevLocation && prevLocation.lat && prevLocation.lng) {
-            animateMarker(driverMarker, [prevLocation.lng, prevLocation.lat], [lng, lat], 1000); // 1000ms duration
-        } else {
+            // Aktualizuj pozycję markera na mapie
             driverMarker.setLngLat([lng, lat]);
-        }
 
-        // Zaktualizuj pozycję kamery tylko jeśli kierowca sam nie przegląda teraz mapy
-        if (!isUserPanning) {
-            map.easeTo({
-                center: [lng, lat],
-                bearing: heading !== null && !isNaN(heading) ? heading : map.getBearing(),
-                duration: 1000,
-                easing: (t) => t
-            });
-        }
+            // Jeśli użytkownik nie przesuwa mapy palcem, centruj kamerę na nim
+            if (!isUserPanning) {
+                map.setCenter([lng, lat]);
+                if (position.coords.heading) {
+                    map.setBearing(position.coords.heading); // obrót mapy zgodnie z jazdą
+                }
+            }
 
-        // --- LOGIKA REROUTINGU ---
-        // Aktualizuj trasę z obecnej pozycji maksimum raz na 10 sekund
-        const now = Date.now();
-        if (now - lastRouteCalcTime > 10000) {
-            lastRouteCalcTime = now;
+            // REROUTING (Odśwież trasę co 10s)
+            const now = Date.now();
+            if (now - lastRouteCalcTime > 10000) {
+                lastRouteCalcTime = now;
+                document.getElementById('input-start').value = "📍 Aktualna Pozycja";
+                document.getElementById('lat-start').value = lat;
+                document.getElementById('lng-start').value = lng;
+                calculateRoute(true);
+            }
 
-            // Podmień wartości w ukrytym formularzu startowym na nasz bieżący GPS
-            document.getElementById('input-start').value = "📍 Aktualna Pozycja";
-            document.getElementById('lat-start').value = lat;
-            document.getElementById('lng-start').value = lng;
-
-            // Przelicz trasę na nowo w tle, cel pozostaje bez zmian
-            calculateRoute(true);
-        }
-
-    }, (error) => {
-        console.warn("GPS zablokowany lub zgubiony sygnał", error);
-    }, {
-        enableHighAccuracy: true,
-        maximumAge: 0,
-        timeout: 5000
-    });
+        }, function(error) {
+            alert('Błąd GPS: ' + error.message);
+        }, { enableHighAccuracy: true });
+    } else {
+        alert('Twoja przeglądarka nie obsługuje GPS!');
+    }
 }
 
 function stopNavigation() {
