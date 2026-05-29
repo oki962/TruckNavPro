@@ -1,0 +1,7 @@
+{
+  "name": "truck-nav-pro",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Nawigacja z backend-proxy Vercel Serverless",
+  "private": true
+}
