@@ -6,6 +6,9 @@ let restrictionMarkers = [];
 let currentRoutesData = null; // Przechowuje trasy wektorowe
 let routeTooltips = []; // Dymki dla tras
 let poiMarkers = []; // Markery POI (parkingi, stacje, mop)
+let myDriveMarker = null; // Marker naszej ciężarówki
+let isUserPanning = false; // Flaga czy kierowca przesuwa mapę
+let navWatchId = null; // ID śledzenia GPS
 
 // =========================================================================
 // 1. PROFILE POJAZDÓW
@@ -44,6 +47,12 @@ function initMap() {
         fetchRestrictions(); // Pobierz znaki na start
     });
 
+    map.on('dragstart', () => {
+        isUserPanning = true;
+        const centerBtn = document.getElementById('recenter-btn');
+        if(centerBtn) centerBtn.style.display = 'block';
+    });
+
     // ZMIANA: Czekamy 800ms po zakończeniu przesuwania mapy, żeby nie zaspamować serwera
     map.on('moveend', () => {
         clearTimeout(overpassTimeout);
@@ -53,15 +62,7 @@ function initMap() {
         }, 1500);
     });
 
-    // Użytkownik dotyka i przesuwa mapę ręcznie - zawieszamy centrowanie GPS
-    map.on('dragstart', () => {
-        if (watchId !== null) { // Tylko gdy nawigacja jest włączona
-            isUserPanning = true;
-            document.getElementById('recenter-btn').style.display = 'block';
-        }
-    });
-
-    // Odczytywanie zapisanej trasy z LocalStorage przy starcie
+        // Odczytywanie zapisanej trasy z LocalStorage przy starcie
     let routeRestored = false;
     try {
         const savedRouteStr = localStorage.getItem('trucknav_last_route');
@@ -104,6 +105,8 @@ function initMap() {
         }, () => console.log("Brak GPS."));
     }
 }
+
+
 
 // =========================================================================
 // 3. MAGIA ZNAKÓW (Zabezpieczenie przed 429 i 504)
@@ -800,82 +803,79 @@ async function fetchPOIs() {
 // =========================================================================
 // 9. TRYB JAZDY NA ŻYWO (GPS WATCH, OBRÓT, PITCH)
 // =========================================================================
-let watchId = null;
-let driverMarker = null;
 let lastRouteCalcTime = 0;
-let isUserPanning = false;
 
 function recenterMap() {
     isUserPanning = false;
     document.getElementById('recenter-btn').style.display = 'none';
     if (currentUserLocation) {
-        map.flyTo({ center: [currentUserLocation.lng, currentUserLocation.lat], zoom: 15.5, pitch: 55, duration: 800 });
+        map.flyTo({ center: [currentUserLocation.lng, currentUserLocation.lat], zoom: 14.5, pitch: 55, duration: 800 });
     }
 }
 
-function startNavigation() {
-    // 1. Ukryj paski i alternatywne trasy (to co już masz)
+function hideSearchPanels() {
     document.getElementById('full-search-panel').style.display = 'none';
     document.getElementById('simple-search-bar').style.display = 'none';
     document.getElementById('poi-panel-container').style.display = 'none';
     document.getElementById('start-drive-btn').style.display = 'none';
-    document.getElementById('exit-routing-btn').style.display = 'none';
     document.getElementById('stop-drive-btn').style.display = 'block';
 
-    if (currentRoutesData && map.getSource('routes')) {
-        currentRoutesData.features = currentRoutesData.features.filter(f => f.properties.isMain);
-        map.getSource('routes').setData(currentRoutesData);
+    // Upewniamy się ze ukrylismy smieci z poprzedniej wersji UI jezeli są
+    const extBtn = document.getElementById('exit-routing-btn');
+    if (extBtn) extBtn.style.display = 'none';
+}
+
+function startNavigation() {
+    // 1. Ukryj paski i alternatywne trasy
+    hideSearchPanels();
+
+    if (currentRoutesData) {
+        const mainRoute = currentRoutesData.features.find(f => f.properties.isMain);
+        if (mainRoute) {
+            map.getSource('routes').setData({
+                type: 'FeatureCollection',
+                features: [mainRoute]
+            });
+        }
     }
     routeTooltips.forEach(t => t.remove());
     routeTooltips = [];
 
-    // 2. FIZYCZNIE przełącz mapę w tryb jazdy 3D
-    map.setPitch(55); // pochylenie mapy pod widok zza szyby
-    map.setZoom(14.5); // delikatne oddalenie, żeby kierowca widział drogę
+    // 2. FIZYCZNIE przełącz mapę w tryb jazdy 3D (pochylenie i delikatny zoom)
+    map.setPitch(55);
+    map.setZoom(14.5);
+    isUserPanning = false;
 
-    if (driverMarker) driverMarker.remove();
-    const elDiv = document.createElement('div');
-    elDiv.className = 'truck-nav-marker';
-    elDiv.innerHTML = "⬆";
-
-    // Bezpieczne wczytanie defaulta
-    const startLng = (currentUserLocation && currentUserLocation.lng) ? currentUserLocation.lng : 19.0;
-    const startLat = (currentUserLocation && currentUserLocation.lat) ? currentUserLocation.lat : 50.0;
-
-    driverMarker = new maptilersdk.Marker({ element: elDiv, pitchAlignment: 'map' })
-        .setLngLat([startLng, startLat])
-        .addTo(map);
-
-    // 3. FIZYCZNIE odpal śledzenie GPS
+    // 3. FIZYCZNIE odpal śledzenie GPS na żywo
     if (navigator.geolocation) {
-        watchId = navigator.geolocation.watchPosition(function(position) {
+        // Jeśli marker jeszcze nie istnieje, stwórzmy go (np. jako niebieskie kółko)
+        if (!myDriveMarker) {
+            const el = document.createElement('div');
+            el.style.width = '24px';
+            el.style.height = '24px';
+            el.style.background = '#1a73e8';
+            el.style.border = '3px solid white';
+            el.style.borderRadius = '50%';
+            el.style.boxShadow = '0 0 10px rgba(0,0,0,0.5)';
+
+            myDriveMarker = new maptilersdk.Marker({ element: el }).setLngLat([0,0]).addTo(map);
+        }
+
+        navWatchId = navigator.geolocation.watchPosition(function(position) {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
             currentUserLocation = { lat, lng };
 
-            // Aktualizuj pozycję markera na mapie
-            driverMarker.setLngLat([lng, lat]);
+            myDriveMarker.setLngLat([lng, lat]); // Aktualizuj pozycję strzałki
 
-            // Jeśli użytkownik nie przesuwa mapy palcem, centruj kamerę na nim
             if (!isUserPanning) {
-                map.setCenter([lng, lat]);
+                map.setCenter([lng, lat]); // Centruj kamerę na ciężarówce
                 if (position.coords.heading) {
-                    map.setBearing(position.coords.heading); // obrót mapy zgodnie z jazdą
+                    map.setBearing(position.coords.heading); // Obróć mapę w stronę jazdy
                 }
             }
-
-            // REROUTING (Odśwież trasę co 10s)
-            const now = Date.now();
-            if (now - lastRouteCalcTime > 10000) {
-                lastRouteCalcTime = now;
-                document.getElementById('input-start').value = "📍 Aktualna Pozycja";
-                document.getElementById('lat-start').value = lat;
-                document.getElementById('lng-start').value = lng;
-                calculateRoute(true);
-            }
-
         }, function(error) {
-            alert('Błąd GPS: ' + error.message);
+            console.error('Błąd GPS: ' + error.message);
         }, { enableHighAccuracy: true });
     } else {
         alert('Twoja przeglądarka nie obsługuje GPS!');
@@ -883,42 +883,21 @@ function startNavigation() {
 }
 
 function stopNavigation() {
-    if (watchId !== null) {
-        navigator.geolocation.clearWatch(watchId);
-        watchId = null;
+    if (navWatchId) {
+        navigator.geolocation.clearWatch(navWatchId);
+        navWatchId = null;
     }
+    map.setPitch(0); // Zgodnie z wczesniejsza wola user (nie zostawiamy 45 pochylonego bo user narzekal na to kiedys)
+    map.setBearing(0);
 
-    if (driverMarker) {
-        driverMarker.remove();
-        driverMarker = null;
-    }
+    if(myDriveMarker) { myDriveMarker.remove(); myDriveMarker = null; }
 
-    // Powrót do widoku płaskiego "Z lotu ptaka" z północą
-    map.easeTo({
-        pitch: 0,
-        bearing: 0,
-        zoom: 14.5,
-        duration: 1000
-    });
-
-    // Przywrócenie interfejsu i stanu
-    isUserPanning = false;
-    document.getElementById('recenter-btn').style.display = 'none';
-    document.getElementById('stop-drive-btn').style.display = 'none';
-
-    // Użytkownik zakończył jazdę. Ukrywamy zaawansowane panele i zwracamy ekran startowy
+    // Przywróć wyszukiwarkę bazową
     document.getElementById('full-search-panel').style.display = 'none';
-    document.getElementById('exit-routing-btn').style.display = 'none';
-    document.getElementById('telemetry-panel').style.display = 'none';
-
+    document.getElementById('stop-drive-btn').style.display = 'none';
     document.getElementById('simple-search-bar').style.display = 'block';
     document.getElementById('poi-panel-container').style.display = 'flex';
+    document.getElementById('recenter-btn').style.display = 'none';
 
-    // Usuń trasę z mapy, aby zachować czysty widok po skończeniu jazdy
-    if (map.getSource('routes')) {
-        if (map.getLayer('routes-line')) map.removeLayer('routes-line');
-        if (map.getLayer('routes-click')) map.removeLayer('routes-click');
-        map.removeSource('routes');
-        currentRoutesData = null;
-    }
+    if(map.getSource('routes')) map.getSource('routes').setData({ type: 'FeatureCollection', features: [] });
 }
