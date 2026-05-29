@@ -53,6 +53,14 @@ function initMap() {
         }, 1500);
     });
 
+    // Użytkownik dotyka i przesuwa mapę ręcznie - zawieszamy centrowanie GPS
+    map.on('dragstart', () => {
+        if (watchId !== null) { // Tylko gdy nawigacja jest włączona
+            isUserPanning = true;
+            document.getElementById('recenter-btn').style.display = 'block';
+        }
+    });
+
     // Odczytywanie zapisanej trasy z LocalStorage przy starcie
     let routeRestored = false;
     try {
@@ -752,6 +760,15 @@ async function fetchPOIs() {
 let watchId = null;
 let driverMarker = null;
 let lastRouteCalcTime = 0;
+let isUserPanning = false;
+
+function recenterMap() {
+    isUserPanning = false;
+    document.getElementById('recenter-btn').style.display = 'none';
+    if (currentUserLocation) {
+        map.flyTo({ center: [currentUserLocation.lng, currentUserLocation.lat], zoom: 17.5, duration: 800 });
+    }
+}
 
 function startNavigation() {
     if (!navigator.geolocation) {
@@ -775,12 +792,9 @@ function startNavigation() {
     if (driverMarker) driverMarker.remove();
     const elDiv = document.createElement('div');
     elDiv.className = 'truck-nav-marker';
-    // Zapobieganie przechwytywaniu eventów przez marker (aby nie kleił się do palca przy przeciąganiu)
-    elDiv.style.pointerEvents = 'none';
     elDiv.innerHTML = "⬆"; // Strzałka kierunkowa
 
-    // Marker wyłączony z obsługi myszki
-    driverMarker = new maptilersdk.Marker({ element: elDiv, pitchAlignment: 'map', interactive: false })
+    driverMarker = new maptilersdk.Marker({ element: elDiv, pitchAlignment: 'map' })
         .setLngLat([currentUserLocation?.lng || 19.0, currentUserLocation?.lat || 50.0])
         .addTo(map);
 
@@ -792,16 +806,18 @@ function startNavigation() {
 
         currentUserLocation = { lat, lng };
 
-        // Zaktualizuj fizyczną pozycję na mapie
+        // Zaktualizuj fizyczną pozycję na mapie (Zawsze)
         driverMarker.setLngLat([lng, lat]);
 
-        // Zaktualizuj pozycję "kamery" płynnie nad podążającą ciężarówką
-        map.easeTo({
-            center: [lng, lat],
-            bearing: heading !== null && !isNaN(heading) ? heading : map.getBearing(),
-            duration: 800, // Synchronizacja z update GPS ~1s
-            easing: (t) => t // Liniowy przeskok, żeby nie skakało
-        });
+        // Zaktualizuj pozycję kamery tylko jeśli kierowca sam nie przegląda teraz mapy
+        if (!isUserPanning) {
+            map.easeTo({
+                center: [lng, lat],
+                bearing: heading !== null && !isNaN(heading) ? heading : map.getBearing(),
+                duration: 800,
+                easing: (t) => t
+            });
+        }
 
         // --- LOGIKA REROUTINGU ---
         // Aktualizuj trasę z obecnej pozycji maksimum raz na 10 sekund
@@ -847,6 +863,8 @@ function stopNavigation() {
     });
 
     // Przywrócenie interfejsu
+    isUserPanning = false;
+    document.getElementById('recenter-btn').style.display = 'none';
     document.getElementById('stop-drive-btn').style.display = 'none';
     document.getElementById('full-search-panel').style.display = 'block';
 }
