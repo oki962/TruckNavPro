@@ -392,40 +392,43 @@ async function calculateRoute(isBackground = false) {
             });
 
             // Rysowanie na mapie
-            if (map.getSource('routes')) {
+            // Twarde czyszczenie błędnych/starych warstw aby zapobiec konfliktom dodawania addLayer
+            if (map.getLayer('routes-line')) map.removeLayer('routes-line');
+            if (map.getLayer('routes-click')) map.removeLayer('routes-click');
+            if (map.getSource('routes')) map.removeSource('routes');
+
+            map.addSource('routes', { type: 'geojson', data: currentRoutesData });
+
+            // Szeroka, niewidzialna warstwa do ułatwienia klikania palcem na ekranie
+            map.addLayer({
+                id: 'routes-click', type: 'line', source: 'routes',
+                layout: { 'line-join': 'round', 'line-cap': 'round' },
+                paint: { 'line-width': 30, 'line-opacity': 0 }
+            });
+
+            // Właściwa widoczna linia
+            map.addLayer({
+                id: 'routes-line', type: 'line', source: 'routes',
+                layout: { 'line-join': 'round', 'line-cap': 'round' },
+                paint: {
+                    'line-color': ['case', ['boolean', ['get', 'isMain'], false], '#4A4A4A', '#9ca3af'],
+                    'line-width': ['case', ['boolean', ['get', 'isMain'], false], 10, 6],
+                    'line-opacity': ['case', ['boolean', ['get', 'isMain'], false], 1.0, 0.6]
+                }
+            });
+
+            // Obsługa kliknięcia w alternatywną trasę
+            // Najpierw zdejmujemy stare ewentualne nasłuchiwania by nie dublować callów
+            map.off('click', 'routes-click');
+            map.on('click', 'routes-click', (e) => {
+                const clickedIdx = e.features[0].properties.index;
+                currentRoutesData.features.forEach(f => f.properties.isMain = (f.properties.index === clickedIdx));
                 map.getSource('routes').setData(currentRoutesData);
-            } else {
-                map.addSource('routes', { type: 'geojson', data: currentRoutesData });
 
-                // Szeroka, niewidzialna warstwa do ułatwienia klikania palcem na ekranie
-                map.addLayer({
-                    id: 'routes-click', type: 'line', source: 'routes',
-                    layout: { 'line-join': 'round', 'line-cap': 'round' },
-                    paint: { 'line-width': 30, 'line-opacity': 0 }
-                });
-
-                // Właściwa widoczna linia
-                map.addLayer({
-                    id: 'routes-line', type: 'line', source: 'routes',
-                    layout: { 'line-join': 'round', 'line-cap': 'round' },
-                    paint: {
-                        'line-color': ['case', ['boolean', ['get', 'isMain'], false], '#4A4A4A', '#9ca3af'],
-                        'line-width': ['case', ['boolean', ['get', 'isMain'], false], 10, 6],
-                        'line-opacity': ['case', ['boolean', ['get', 'isMain'], false], 1.0, 0.6]
-                    }
-                });
-
-                // Obsługa kliknięcia w alternatywną trasę
-                map.on('click', 'routes-click', (e) => {
-                    const clickedIdx = e.features[0].properties.index;
-                    currentRoutesData.features.forEach(f => f.properties.isMain = (f.properties.index === clickedIdx));
-                    map.getSource('routes').setData(currentRoutesData);
-
-                    const p = currentRoutesData.features.find(f => f.properties.isMain).properties;
-                    updateTelemetryPanel(p);
-                    renderRouteTooltips();
-                });
-            }
+                const p = currentRoutesData.features.find(f => f.properties.isMain).properties;
+                updateTelemetryPanel(p);
+                renderRouteTooltips();
+            });
 
             if (!isBackground) {
                 renderRouteTooltips();
@@ -447,7 +450,10 @@ async function calculateRoute(isBackground = false) {
             // Ale telemetrię odświeżamy zawsze
             updateTelemetryPanel(currentRoutesData.features[0].properties);
         }
-    } catch (e) { if (!isBackground) alert("Wystąpił problem z wyznaczeniem trasy."); }
+    } catch (err) {
+        if (!isBackground) alert('CRASH TRASY: ' + err.message + ' | ' + err.stack);
+        console.error(err);
+    }
     finally { if (!isBackground) document.getElementById('calc-btn-text').innerText = "Wyznacz trasę"; }
 }
 
