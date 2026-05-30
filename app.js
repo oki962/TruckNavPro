@@ -820,12 +820,11 @@ function recenterMap() {
     }
 
     // Wymuszamy idealną wysokość nawigacji i kąt 3D (Zgodnie z wymaganiami powrotu do defaultu)
-    map.easeTo({
+    map.flyTo({
         center: [lng, lat],
-        zoom: 14.5, // niezależnie od tego jak bardzo użytkownik ją wcześniej przybliżył/oddalił
-        pitch: 55,  // Powrót do trybu jazdy 3D
-        padding: { top: 0, bottom: Math.floor(window.innerHeight / 3), left: 0, right: 0 },
-        duration: 500
+        zoom: 14.5,
+        pitch: 55,
+        duration: 800
     });
 }
 
@@ -953,22 +952,18 @@ function startNavigation() {
 
             // WAŻNE: Aktualizuj centrowanie mapy również na podstawie przyciągniętych współrzędnych!
             if (!isUserPanning) {
-                // 1. Dynamiczny Zoom oparty na prędkości (speed z satelity jest w m/s)
                 let targetZoom = 14.5;
-                if (position.coords.speed !== null) {
+                if (position.coords.speed !== null && position.coords.speed > 0) {
                     let speedKmh = position.coords.speed * 3.6;
-                    if (speedKmh > 80) targetZoom = 13.5;      // Autostrada - oddalamy kamerę
-                    else if (speedKmh < 30) targetZoom = 15.5; // Manewry i korki - zbliżamy
-                    else targetZoom = 15.5 - ((speedKmh - 30) / 50) * 2.0; // Płynna interpolacja
+                    if (speedKmh > 80) targetZoom = 13.5;
+                    else if (speedKmh < 30) targetZoom = 15.5;
+                    else targetZoom = 15.5 - ((speedKmh - 30) / 50) * 2.0;
                 }
-
-                // 2. Kamera Asymetryczna (Look-ahead) - zostawiamy więcej miejsca na górze ekranu
-                let bottomPadding = Math.floor(window.innerHeight / 3);
 
                 map.easeTo({
                     center: [markerLng, markerLat],
                     zoom: targetZoom,
-                    padding: { top: 0, bottom: bottomPadding, left: 0, right: 0 },
+                    pitch: 55,
                     duration: 1000,
                     easing: t => t
                 });
