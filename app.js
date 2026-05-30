@@ -414,7 +414,7 @@ async function calculateRoute(isBackground = false) {
                 id: 'routes-line', type: 'line', source: 'routes',
                 layout: { 'line-join': 'round', 'line-cap': 'round' },
                 paint: {
-                    'line-color': ['case', ['boolean', ['get', 'isMain'], false], '#4A4A4A', '#9ca3af'],
+                        'line-color': ['case', ['boolean', ['get', 'isMain'], false], '#1a73e8', '#808080'],
                     'line-width': ['case', ['boolean', ['get', 'isMain'], false], 10, 6],
                     'line-opacity': ['case', ['boolean', ['get', 'isMain'], false], 1.0, 0.6]
                 }
@@ -857,6 +857,7 @@ function startNavigation() {
             el.style.border = '3px solid white';
             el.style.borderRadius = '50%';
             el.style.boxShadow = '0 0 10px rgba(0,0,0,0.5)';
+            el.style.transition = 'transform 1.0s linear'; // Super płynny ruch strzałki bez skakania
 
             myDriveMarker = new maptilersdk.Marker({ element: el }).setLngLat([0,0]).addTo(map);
         }
@@ -869,9 +870,31 @@ function startNavigation() {
             myDriveMarker.setLngLat([lng, lat]); // Aktualizuj pozycję strzałki
 
             if (!isUserPanning) {
-                map.setCenter([lng, lat]); // Centruj kamerę na ciężarówce
-                if (position.coords.heading) {
-                    map.setBearing(position.coords.heading); // Obróć mapę w stronę jazdy
+                // Kamera w trybie jazdy: płynne podążanie bez szarpania
+                map.easeTo({
+                    center: [lng, lat],
+                    bearing: position.coords.heading || map.getBearing(),
+                    duration: 1000,
+                    easing: t => t
+                });
+            }
+
+            // Route Trimming: Obcinanie przejechanych punktów za ciężarówką
+            if (currentRoutesData && currentRoutesData.features && currentRoutesData.features.length > 0) {
+                // Bezpieczne wymuszenie ukrycia szarych, odrzuconych tras by nie wracały przy trimowaniu
+                currentRoutesData.features = currentRoutesData.features.filter(f => f.properties.isMain);
+
+                let coords = currentRoutesData.features[0].geometry.coordinates;
+                let minDist = Infinity;
+                let closestIdx = 0;
+                // Szukaj najbliższego punktu tylko w promieniu kilkudziesięciu najbliższych, żeby nie zawracać
+                for (let i = 0; i < Math.min(50, coords.length); i++) {
+                    const dist = Math.pow(coords[i][0] - lng, 2) + Math.pow(coords[i][1] - lat, 2);
+                    if (dist < minDist) { minDist = dist; closestIdx = i; }
+                }
+                if (closestIdx > 0) {
+                    currentRoutesData.features[0].geometry.coordinates = coords.slice(closestIdx);
+                    if (map.getSource('routes')) map.getSource('routes').setData(currentRoutesData);
                 }
             }
         }, function(error) {
