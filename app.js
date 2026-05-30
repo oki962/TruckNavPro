@@ -824,6 +824,7 @@ function recenterMap() {
         center: [lng, lat],
         zoom: 14.5, // niezależnie od tego jak bardzo użytkownik ją wcześniej przybliżył/oddalił
         pitch: 55,  // Powrót do trybu jazdy 3D
+        padding: { top: 0, bottom: Math.floor(window.innerHeight / 3), left: 0, right: 0 },
         duration: 500
     });
 }
@@ -952,7 +953,29 @@ function startNavigation() {
 
             // WAŻNE: Aktualizuj centrowanie mapy również na podstawie przyciągniętych współrzędnych!
             if (!isUserPanning) {
-                map.easeTo({ center: [markerLng, markerLat], bearing: position.coords.heading || map.getBearing(), duration: 1000, easing: t => t });
+                // 1. Dynamiczny Zoom oparty na prędkości (speed z satelity jest w m/s)
+                let targetZoom = 14.5;
+                if (position.coords.speed !== null) {
+                    let speedKmh = position.coords.speed * 3.6;
+                    if (speedKmh > 80) targetZoom = 13.5;      // Autostrada - oddalamy kamerę
+                    else if (speedKmh < 30) targetZoom = 15.5; // Manewry i korki - zbliżamy
+                    else targetZoom = 15.5 - ((speedKmh - 30) / 50) * 2.0; // Płynna interpolacja
+                }
+
+                // 2. Kamera Asymetryczna (Look-ahead) - zostawiamy więcej miejsca na górze ekranu
+                let bottomPadding = Math.floor(window.innerHeight / 3);
+
+                map.easeTo({
+                    center: [markerLng, markerLat],
+                    zoom: targetZoom,
+                    padding: { top: 0, bottom: bottomPadding, left: 0, right: 0 },
+                    duration: 1000,
+                    easing: t => t
+                });
+
+                if (position.coords.heading) {
+                    map.easeTo({ bearing: position.coords.heading, duration: 1000 });
+                }
             }
 
             // Route Trimming: Obcinanie przejechanych punktów za ciężarówką
