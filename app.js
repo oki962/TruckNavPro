@@ -828,31 +828,6 @@ function recenterMap() {
     });
 }
 
-// Funkcja animująca marker w Vanilla JS (Płynna interpolacja pomiędzy koordynatami bez crashowania mapbox-gl pointerevents)
-let animationFrameId = null;
-function animateMarker(marker, startLngLat, endLngLat, duration) {
-    if (animationFrameId) cancelAnimationFrame(animationFrameId);
-
-    const startTime = performance.now();
-    const [startLng, startLat] = startLngLat;
-    const [endLng, endLat] = endLngLat;
-
-    function animate(time) {
-        let timeFraction = (time - startTime) / duration;
-        if (timeFraction > 1) timeFraction = 1;
-
-        const currentLng = startLng + (endLng - startLng) * timeFraction;
-        const currentLat = startLat + (endLat - startLat) * timeFraction;
-
-        // Zgodnie z bezwzględnymi zasadami uzytkownika robimy setLngLat
-        marker.setLngLat([currentLng, currentLat]);
-
-        if (timeFraction < 1) {
-            animationFrameId = requestAnimationFrame(animate);
-        }
-    }
-    animationFrameId = requestAnimationFrame(animate);
-}
 
 function hideSearchPanels() {
     document.getElementById('full-search-panel').style.display = 'none';
@@ -890,8 +865,6 @@ function startNavigation() {
     routeTooltips = [];
 
     // 2. FIZYCZNIE przełącz mapę w tryb jazdy 3D (pochylenie i delikatny zoom)
-    map.setPitch(55);
-    map.setZoom(14.5);
     isUserPanning = false;
 
     // 3. FIZYCZNIE odpal śledzenie GPS na żywo
@@ -914,6 +887,13 @@ function startNavigation() {
                 startPos = [currentUserLocation.lng, currentUserLocation.lat]; // Zapasowo lokalizacja urządzenia
             }
             myDriveMarker = new maptilersdk.Marker({ element: el, pitchAlignment: 'map', interactive: false }).setLngLat(startPos).addTo(map);
+
+            // Wymuszamy CSS Transition ZAMIAST animacji klatkowej w JS
+            el.style.transition = 'transform 1.0s linear';
+            el.style.willChange = 'transform';
+
+            // Startowe ustawienie kamery jako NATYCHMIASTOWY SKOK
+            map.jumpTo({ center: startPos, zoom: 14.5, pitch: 55 });
         }
 
         navWatchId = navigator.geolocation.watchPosition(function(position) {
@@ -946,31 +926,32 @@ function startNavigation() {
                 }
             }
 
-            // Płynne podążanie markera - Interpolacja pozycji
-            const currentMarkerPos = myDriveMarker.getLngLat();
-            animateMarker(myDriveMarker, [currentMarkerPos.lng, currentMarkerPos.lat], [markerLng, markerLat], 1000);
+            // Aktualizacja markera (animowane przez CSS transition zaaplikowane przy tworzeniu)
+            myDriveMarker.setLngLat([markerLng, markerLat]);
 
-            // WAŻNE: Aktualizuj centrowanie mapy również na podstawie przyciągniętych współrzędnych!
+            // Pojedynczy easeTo obsługujący całość kamery w jednej klatce z uwzględnieniem bearing
             if (!isUserPanning) {
                 let targetZoom = 14.5;
+                let cameraOpts = {
+                    center: [markerLng, markerLat],
+                    pitch: 55,
+                    duration: 1000,
+                    easing: t => t
+                };
+
                 if (position.coords.speed !== null && position.coords.speed > 0) {
                     let speedKmh = position.coords.speed * 3.6;
                     if (speedKmh > 80) targetZoom = 13.5;
                     else if (speedKmh < 30) targetZoom = 15.5;
                     else targetZoom = 15.5 - ((speedKmh - 30) / 50) * 2.0;
                 }
+                cameraOpts.zoom = targetZoom;
 
-                map.easeTo({
-                    center: [markerLng, markerLat],
-                    zoom: targetZoom,
-                    pitch: 55,
-                    duration: 1000,
-                    easing: t => t
-                });
-
-                if (position.coords.heading) {
-                    map.easeTo({ bearing: position.coords.heading, duration: 1000 });
+                if (position.coords.heading !== null && !isNaN(position.coords.heading)) {
+                    cameraOpts.bearing = position.coords.heading;
                 }
+
+                map.easeTo(cameraOpts);
             }
 
             // Route Trimming: Obcinanie przejechanych punktów za ciężarówką
