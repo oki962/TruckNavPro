@@ -440,7 +440,7 @@ async function calculateRoute(isBackground = false) {
                 // Centrowanie mapy tylko, gdy nie jedziemy (nie w tle)
                 const bounds = new maptilersdk.LngLatBounds();
                 currentRoutesData.features[0].geometry.coordinates.forEach(c => bounds.extend(c));
-                map.fitBounds(bounds, { padding: 50 });
+                map.fitBounds(bounds, { padding: 50, duration: 600 });
 
                 // Pokaż przycisk Start Nav oraz Powrót tylko gdy wyliczamy nową trasę jako użytkownik
                 document.getElementById('start-drive-btn').style.display = 'block';
@@ -612,7 +612,7 @@ function renderSimpleDropdown(results, dropdown, inputEl) {
 
 function dropPinAndShowAction(lat, lng, name, context) {
     // 1. Zbliżenie i lot na miejsce
-    map.flyTo({ center: [lng, lat], zoom: 15.5, pitch: 45 });
+    map.flyTo({ center: [lng, lat], zoom: 15.5, pitch: 45, speed: 2.5, curve: 1 });
 
     // 2. Usuwamy starą pinezkę jeśli jest
     if (destinationMarker) destinationMarker.remove();
@@ -824,7 +824,8 @@ function recenterMap() {
         center: [lng, lat],
         zoom: 14.5, // niezależnie od tego jak bardzo użytkownik ją wcześniej przybliżył/oddalił
         pitch: 55,  // Powrót do trybu jazdy 3D
-        duration: 1000
+        padding: { top: 0, bottom: Math.floor(window.innerHeight / 3), left: 0, right: 0 },
+        duration: 500
     });
 }
 
@@ -907,7 +908,13 @@ function startNavigation() {
             el.style.boxShadow = '0 0 10px rgba(0,0,0,0.5)';
             el.style.pointerEvents = 'none'; // Odpinamy wszelkie zjawiska touch & hover
 
-            myDriveMarker = new maptilersdk.Marker({ element: el, pitchAlignment: 'map', interactive: false }).setLngLat([0,0]).addTo(map);
+            let startPos = [0,0];
+            if (currentRoutesData && currentRoutesData.features.length > 0) {
+                startPos = currentRoutesData.features[0].geometry.coordinates[0]; // Pierwszy punkt wybranej trasy
+            } else if (currentUserLocation) {
+                startPos = [currentUserLocation.lng, currentUserLocation.lat]; // Zapasowo lokalizacja urządzenia
+            }
+            myDriveMarker = new maptilersdk.Marker({ element: el, pitchAlignment: 'map', interactive: false }).setLngLat(startPos).addTo(map);
         }
 
         navWatchId = navigator.geolocation.watchPosition(function(position) {
@@ -946,7 +953,29 @@ function startNavigation() {
 
             // WAŻNE: Aktualizuj centrowanie mapy również na podstawie przyciągniętych współrzędnych!
             if (!isUserPanning) {
-                map.easeTo({ center: [markerLng, markerLat], bearing: position.coords.heading || map.getBearing(), duration: 1000, easing: t => t });
+                // 1. Dynamiczny Zoom oparty na prędkości (speed z satelity jest w m/s)
+                let targetZoom = 14.5;
+                if (position.coords.speed !== null) {
+                    let speedKmh = position.coords.speed * 3.6;
+                    if (speedKmh > 80) targetZoom = 13.5;      // Autostrada - oddalamy kamerę
+                    else if (speedKmh < 30) targetZoom = 15.5; // Manewry i korki - zbliżamy
+                    else targetZoom = 15.5 - ((speedKmh - 30) / 50) * 2.0; // Płynna interpolacja
+                }
+
+                // 2. Kamera Asymetryczna (Look-ahead) - zostawiamy więcej miejsca na górze ekranu
+                let bottomPadding = Math.floor(window.innerHeight / 3);
+
+                map.easeTo({
+                    center: [markerLng, markerLat],
+                    zoom: targetZoom,
+                    padding: { top: 0, bottom: bottomPadding, left: 0, right: 0 },
+                    duration: 1000,
+                    easing: t => t
+                });
+
+                if (position.coords.heading) {
+                    map.easeTo({ bearing: position.coords.heading, duration: 1000 });
+                }
             }
 
             // Route Trimming: Obcinanie przejechanych punktów za ciężarówką
