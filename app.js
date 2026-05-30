@@ -888,10 +888,6 @@ function startNavigation() {
             }
             myDriveMarker = new maptilersdk.Marker({ element: el, pitchAlignment: 'map', interactive: false }).setLngLat(startPos).addTo(map);
 
-            // Wymuszamy CSS Transition ZAMIAST animacji klatkowej w JS
-            el.style.transition = 'transform 1.0s linear';
-            el.style.willChange = 'transform';
-
             // Startowe ustawienie kamery jako NATYCHMIASTOWY SKOK
             map.jumpTo({ center: startPos, zoom: 14.5, pitch: 55 });
         }
@@ -926,11 +922,13 @@ function startNavigation() {
                 }
             }
 
-            // Aktualizacja markera (animowane przez CSS transition zaaplikowane przy tworzeniu)
-            myDriveMarker.setLngLat([markerLng, markerLat]);
-
-            // Pojedynczy easeTo obsługujący całość kamery w jednej klatce z uwzględnieniem bearing
+            // Gdy kierowca nie przesuwa mapy - uaktualniamy widok i pozycję
             if (!isUserPanning) {
+
+                // 1. Twardy skok znacznika na nową pozycję GPS (bez pływającego CSS)
+                myDriveMarker.setLngLat([markerLng, markerLat]);
+
+                // 2. Dynamiczny zoom kamery
                 let targetZoom = 14.5;
                 let cameraOpts = {
                     center: [markerLng, markerLat],
@@ -951,25 +949,24 @@ function startNavigation() {
                     cameraOpts.bearing = position.coords.heading;
                 }
 
+                // 3. Aktualizacja kamery
                 map.easeTo(cameraOpts);
-            }
 
-            // Route Trimming: Obcinanie przejechanych punktów za ciężarówką
-            if (currentRoutesData && currentRoutesData.features && currentRoutesData.features.length > 0) {
-                // Bezpieczne wymuszenie ukrycia szarych, odrzuconych tras by nie wracały przy trimowaniu
-                currentRoutesData.features = currentRoutesData.features.filter(f => f.properties.isMain);
+                // 4. Obcinanie przejechanej trasy za ciężarówką
+                if (currentRoutesData && currentRoutesData.features && currentRoutesData.features.length > 0) {
+                    currentRoutesData.features = currentRoutesData.features.filter(f => f.properties.isMain);
+                    let coords = currentRoutesData.features[0].geometry.coordinates;
+                    let minDist = Infinity;
+                    let closestIdx = 0;
 
-                let coords = currentRoutesData.features[0].geometry.coordinates;
-                let minDist = Infinity;
-                let closestIdx = 0;
-                // Szukaj najbliższego punktu tylko w promieniu kilkudziesięciu najbliższych, żeby nie zawracać
-                for (let i = 0; i < Math.min(50, coords.length); i++) {
-                    const dist = Math.pow(coords[i][0] - lng, 2) + Math.pow(coords[i][1] - lat, 2);
-                    if (dist < minDist) { minDist = dist; closestIdx = i; }
-                }
-                if (closestIdx > 0) {
-                    currentRoutesData.features[0].geometry.coordinates = coords.slice(closestIdx);
-                    if (map.getSource('routes')) map.getSource('routes').setData(currentRoutesData);
+                    for (let i = 0; i < Math.min(50, coords.length); i++) {
+                        const dist = Math.pow(coords[i][0] - lng, 2) + Math.pow(coords[i][1] - lat, 2);
+                        if (dist < minDist) { minDist = dist; closestIdx = i; }
+                    }
+                    if (closestIdx > 0) {
+                        currentRoutesData.features[0].geometry.coordinates = coords.slice(closestIdx);
+                        if (map.getSource('routes')) map.getSource('routes').setData(currentRoutesData);
+                    }
                 }
             }
         }, function(error) {
