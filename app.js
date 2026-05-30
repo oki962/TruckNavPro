@@ -865,9 +865,9 @@ function startNavigation() {
             el.style.border = '3px solid white';
             el.style.borderRadius = '50%';
             el.style.boxShadow = '0 0 10px rgba(0,0,0,0.5)';
-            el.style.transition = 'transform 1.0s linear'; // Super płynny ruch strzałki bez skakania
+            el.style.pointerEvents = 'none'; // Odpinamy wszelkie zjawiska touch & hover
 
-            myDriveMarker = new maptilersdk.Marker({ element: el }).setLngLat([0,0]).addTo(map);
+            myDriveMarker = new maptilersdk.Marker({ element: el, pitchAlignment: 'map', interactive: false }).setLngLat([0,0]).addTo(map);
         }
 
         navWatchId = navigator.geolocation.watchPosition(function(position) {
