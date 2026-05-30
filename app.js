@@ -828,6 +828,32 @@ function recenterMap() {
     });
 }
 
+// Funkcja animująca marker w Vanilla JS (Płynna interpolacja pomiędzy koordynatami bez crashowania mapbox-gl pointerevents)
+let animationFrameId = null;
+function animateMarker(marker, startLngLat, endLngLat, duration) {
+    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+
+    const startTime = performance.now();
+    const [startLng, startLat] = startLngLat;
+    const [endLng, endLat] = endLngLat;
+
+    function animate(time) {
+        let timeFraction = (time - startTime) / duration;
+        if (timeFraction > 1) timeFraction = 1;
+
+        const currentLng = startLng + (endLng - startLng) * timeFraction;
+        const currentLat = startLat + (endLat - startLat) * timeFraction;
+
+        // Zgodnie z bezwzględnymi zasadami uzytkownika robimy setLngLat
+        marker.setLngLat([currentLng, currentLat]);
+
+        if (timeFraction < 1) {
+            animationFrameId = requestAnimationFrame(animate);
+        }
+    }
+    animationFrameId = requestAnimationFrame(animate);
+}
+
 function hideSearchPanels() {
     document.getElementById('full-search-panel').style.display = 'none';
     document.getElementById('simple-search-bar').style.display = 'none';
@@ -880,7 +906,6 @@ function startNavigation() {
             el.style.borderRadius = '50%';
             el.style.boxShadow = '0 0 10px rgba(0,0,0,0.5)';
             el.style.pointerEvents = 'none'; // Odpinamy wszelkie zjawiska touch & hover
-            el.style.transition = 'transform 1s linear';
 
             myDriveMarker = new maptilersdk.Marker({ element: el, pitchAlignment: 'map', interactive: false }).setLngLat([0,0]).addTo(map);
         }
@@ -915,7 +940,9 @@ function startNavigation() {
                 }
             }
 
-            myDriveMarker.setLngLat([markerLng, markerLat]);
+            // Płynne podążanie markera - Interpolacja pozycji
+            const currentMarkerPos = myDriveMarker.getLngLat();
+            animateMarker(myDriveMarker, [currentMarkerPos.lng, currentMarkerPos.lat], [markerLng, markerLat], 1000);
 
             // WAŻNE: Aktualizuj centrowanie mapy również na podstawie przyciągniętych współrzędnych!
             if (!isUserPanning) {
