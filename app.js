@@ -9,6 +9,7 @@ let poiMarkers = []; // Markery POI (parkingi, stacje, mop)
 let myDriveMarker = null; // Marker naszej ciężarówki
 let isUserPanning = false; // Flaga czy kierowca przesuwa mapę
 let navWatchId = null; // ID śledzenia GPS
+let wakeLock = null;
 
 // =========================================================================
 // 1. PROFILE POJAZDÓW
@@ -826,6 +827,13 @@ function hideSearchPanels() {
 }
 
 function startNavigation() {
+    // Blokada ekranu (Screen Wake Lock API)
+    if ('wakeLock' in navigator) {
+        navigator.wakeLock.request('screen').then(wl => {
+            wakeLock = wl;
+        }).catch(err => console.warn('Błąd Wake Lock:', err));
+    }
+
     // 1. Ukryj paski i alternatywne trasy
     hideSearchPanels();
 
@@ -867,16 +875,36 @@ function startNavigation() {
             const lng = position.coords.longitude;
             currentUserLocation = { lat, lng };
 
-            myDriveMarker.setLngLat([lng, lat]); // Aktualizuj pozycję strzałki
+            let markerLng = lng;
+            let markerLat = lat;
 
+            // Jeśli mamy wyznaczoną trasę, przyciągamy znacznik do najbliższego punktu na linii
+            if (currentRoutesData && currentRoutesData.features.length > 0) {
+                const routeCoords = currentRoutesData.features.find(f => f.properties.isMain).geometry.coordinates;
+                let minDist = Infinity;
+                let closestCoord = null;
+
+                // Szukamy najbliższego punktu trasy w promieniu kilku kilometrów
+                for (let i = 0; i < Math.min(100, routeCoords.length); i++) {
+                    const dist = Math.pow(routeCoords[i][0] - lng, 2) + Math.pow(routeCoords[i][1] - lat, 2);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        closestCoord = routeCoords[i];
+                    }
+                }
+
+                // Jeśli jesteśmy w akceptowalnym korytarzu błędu (np. ok 100-200m), snapuj do trasy
+                if (minDist < 0.00005 && closestCoord) {
+                    markerLng = closestCoord[0];
+                    markerLat = closestCoord[1];
+                }
+            }
+
+            myDriveMarker.setLngLat([markerLng, markerLat]);
+
+            // WAŻNE: Aktualizuj centrowanie mapy również na podstawie przyciągniętych współrzędnych!
             if (!isUserPanning) {
-                // Kamera w trybie jazdy: płynne podążanie bez szarpania
-                map.easeTo({
-                    center: [lng, lat],
-                    bearing: position.coords.heading || map.getBearing(),
-                    duration: 1000,
-                    easing: t => t
-                });
+                map.easeTo({ center: [markerLng, markerLat], bearing: position.coords.heading || map.getBearing(), duration: 1000, easing: t => t });
             }
 
             // Route Trimming: Obcinanie przejechanych punktów za ciężarówką
@@ -906,6 +934,10 @@ function startNavigation() {
 }
 
 function stopNavigation() {
+    if (wakeLock) {
+        wakeLock.release().then(() => wakeLock = null);
+    }
+
     if (navWatchId) {
         navigator.geolocation.clearWatch(navWatchId);
         navWatchId = null;
