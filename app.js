@@ -440,7 +440,7 @@ async function calculateRoute(isBackground = false) {
                 // Centrowanie mapy tylko, gdy nie jedziemy (nie w tle)
                 const bounds = new maptilersdk.LngLatBounds();
                 currentRoutesData.features[0].geometry.coordinates.forEach(c => bounds.extend(c));
-                map.fitBounds(bounds, { padding: 50 });
+                map.fitBounds(bounds, { padding: 50, duration: 600 });
 
                 // Pokaż przycisk Start Nav oraz Powrót tylko gdy wyliczamy nową trasę jako użytkownik
                 document.getElementById('start-drive-btn').style.display = 'block';
@@ -612,7 +612,7 @@ function renderSimpleDropdown(results, dropdown, inputEl) {
 
 function dropPinAndShowAction(lat, lng, name, context) {
     // 1. Zbliżenie i lot na miejsce
-    map.flyTo({ center: [lng, lat], zoom: 15.5, pitch: 45 });
+    map.flyTo({ center: [lng, lat], zoom: 15.5, pitch: 45, speed: 2.5, curve: 1 });
 
     // 2. Usuwamy starą pinezkę jeśli jest
     if (destinationMarker) destinationMarker.remove();
@@ -824,7 +824,7 @@ function recenterMap() {
         center: [lng, lat],
         zoom: 14.5, // niezależnie od tego jak bardzo użytkownik ją wcześniej przybliżył/oddalił
         pitch: 55,  // Powrót do trybu jazdy 3D
-        duration: 1000
+        duration: 500
     });
 }
 
@@ -907,7 +907,13 @@ function startNavigation() {
             el.style.boxShadow = '0 0 10px rgba(0,0,0,0.5)';
             el.style.pointerEvents = 'none'; // Odpinamy wszelkie zjawiska touch & hover
 
-            myDriveMarker = new maptilersdk.Marker({ element: el, pitchAlignment: 'map', interactive: false }).setLngLat([0,0]).addTo(map);
+            let startPos = [0,0];
+            if (currentRoutesData && currentRoutesData.features.length > 0) {
+                startPos = currentRoutesData.features[0].geometry.coordinates[0]; // Pierwszy punkt wybranej trasy
+            } else if (currentUserLocation) {
+                startPos = [currentUserLocation.lng, currentUserLocation.lat]; // Zapasowo lokalizacja urządzenia
+            }
+            myDriveMarker = new maptilersdk.Marker({ element: el, pitchAlignment: 'map', interactive: false }).setLngLat(startPos).addTo(map);
         }
 
         navWatchId = navigator.geolocation.watchPosition(function(position) {
