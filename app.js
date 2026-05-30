@@ -56,6 +56,7 @@ function initMap() {
 
     // ZMIANA: Czekamy 800ms po zakończeniu przesuwania mapy, żeby nie zaspamować serwera
     map.on('moveend', () => {
+        if (navWatchId) return; // BLOKADA: Gdy nawigacja jest włączona, nie pobieraj nowych znaków i POI, aby chronić transfer i API
         clearTimeout(overpassTimeout);
         overpassTimeout = setTimeout(() => {
             fetchRestrictions();
@@ -445,6 +446,8 @@ async function calculateRoute(isBackground = false) {
                 // Pokaż przycisk Start Nav oraz Powrót tylko gdy wyliczamy nową trasę jako użytkownik
                 document.getElementById('start-drive-btn').style.display = 'block';
                 document.getElementById('exit-routing-btn').style.display = 'block';
+
+                updatePoiVisibility();
             } else {
                 // Gdy jesteśmy w tle usuwamy stare dymki z poprzedniej trasy jeśli były
                 routeTooltips.forEach(t => t.remove());
@@ -698,15 +701,37 @@ function updatePoiVisibility() {
     const mopEnabled = document.getElementById('poi-mop').checked;
     const laybyEnabled = document.getElementById('poi-layby').checked;
 
+    let routeCoords = null;
+    // Wyciągamy współrzędne głównej linii trasy, jeśli została wyznaczona
+    if (currentRoutesData && currentRoutesData.features && currentRoutesData.features.length > 0) {
+        const mainRoute = currentRoutesData.features.find(f => f.properties.isMain);
+        if (mainRoute) routeCoords = mainRoute.geometry.coordinates;
+    }
+
     poiMarkers.forEach(markerObj => {
         const type = markerObj.poiType;
         const el = markerObj.marker.getElement();
+        const pos = markerObj.marker.getLngLat();
 
         let isVisible = false;
         if (type === 'parking' && parkingEnabled) isVisible = true;
         if (type === 'fuel' && fuelEnabled) isVisible = true;
         if (type === 'mop' && mopEnabled) isVisible = true;
         if (type === 'layby' && laybyEnabled) isVisible = true;
+
+        // MATEMATYCZNY FILTR KORYTARZA TRASY (tolerancja ok. 200-300 metrów)
+        if (isVisible && routeCoords) {
+            let isOnRoute = false;
+            // Sprawdzamy odległość punktu POI od każdego segmentu niebieskiej linii trasy
+            for (let i = 0; i < routeCoords.length; i++) {
+                const distSq = Math.pow(routeCoords[i][0] - pos.lng, 2) + Math.pow(routeCoords[i][1] - pos.lat, 2);
+                if (distSq < 0.00015) { // Próg odległości odpowiadający wąskiemu korytarzowi wzdłuż drogi
+                    isOnRoute = true;
+                    break;
+                }
+            }
+            if (!isOnRoute) isVisible = false; // Jeśli punkt wymaga zjazdu z trasy, ukrywamy go
+        }
 
         el.style.display = isVisible ? 'flex' : 'none';
     });
