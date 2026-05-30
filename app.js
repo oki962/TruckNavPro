@@ -1,10 +1,15 @@
 let map, currentUserLocation;
 const tomtomKey = "";
-const maptilerKey = "";
+const maptilerKey = "SBcreDqKo6myDrCeUBGs";
 
 let restrictionMarkers = [];
 let currentRoutesData = null; // Przechowuje trasy wektorowe
 let routeTooltips = []; // Dymki dla tras
+let poiMarkers = []; // Markery POI (parkingi, stacje, mop)
+let myDriveMarker = null; // Marker naszej ciężarówki
+let isUserPanning = false; // Flaga czy kierowca przesuwa mapę
+let navWatchId = null; // ID śledzenia GPS
+let wakeLock = null;
 
 // =========================================================================
 // 1. PROFILE POJAZDÓW
@@ -43,24 +48,66 @@ function initMap() {
         fetchRestrictions(); // Pobierz znaki na start
     });
 
+    map.on('dragstart', () => {
+        isUserPanning = true;
+        const centerBtn = document.getElementById('recenter-btn');
+        if(centerBtn) centerBtn.style.display = 'block';
+    });
+
     // ZMIANA: Czekamy 800ms po zakończeniu przesuwania mapy, żeby nie zaspamować serwera
     map.on('moveend', () => {
         clearTimeout(overpassTimeout);
-        overpassTimeout = setTimeout(fetchRestrictions, 1500);
+        overpassTimeout = setTimeout(() => {
+            fetchRestrictions();
+            fetchPOIs();
+        }, 1500);
     });
+
+        // Odczytywanie zapisanej trasy z LocalStorage przy starcie
+    let routeRestored = false;
+    try {
+        const savedRouteStr = localStorage.getItem('trucknav_last_route');
+        if (savedRouteStr) {
+            const savedRoute = JSON.parse(savedRouteStr);
+            if (savedRoute && savedRoute.start && savedRoute.dest) {
+                // Wypełnianie pól formularza
+                document.getElementById('input-start').value = savedRoute.start.name;
+                document.getElementById('lat-start').value = savedRoute.start.lat;
+                document.getElementById('lng-start').value = savedRoute.start.lng;
+
+                document.getElementById('input-dest').value = savedRoute.dest.name;
+                document.getElementById('lat-dest').value = savedRoute.dest.lat;
+                document.getElementById('lng-dest').value = savedRoute.dest.lng;
+
+                // Otwieramy panel tras (który teraz nie ukrywa głównego paska wyszukiwarki)
+                openFullPanel();
+                setTimeout(() => { calculateRoute(); }, 500);
+
+                routeRestored = true;
+            }
+        }
+    } catch (e) {
+        console.warn("Błąd odczytu z LocalStorage", e);
+    }
 
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(position => {
             const lat = position.coords.latitude;
             const lng = position.coords.longitude;
             currentUserLocation = { lat, lng };
-            map.flyTo({ center: [lng, lat], zoom: 14.5 });
-            document.getElementById('input-start').value = "📍 Twoja lokalizacja";
-            document.getElementById('lat-start').value = lat;
-            document.getElementById('lng-start').value = lng;
+
+            // Jeśli nie przywróciliśmy trasy, używamy GPS-u jako punkt startowy i centrum
+            if (!routeRestored) {
+                map.flyTo({ center: [lng, lat], zoom: 14.5 });
+                document.getElementById('input-start').value = "📍 Twoja lokalizacja";
+                document.getElementById('lat-start').value = lat;
+                document.getElementById('lng-start').value = lng;
+            }
         }, () => console.log("Brak GPS."));
     }
 }
+
+
 
 // =========================================================================
 // 3. MAGIA ZNAKÓW (Zabezpieczenie przed 429 i 504)
@@ -208,7 +255,7 @@ function setupAutocomplete(inputId) {
 }
 
 function fallbackToTomTom(query, dropdown, inputEl, wrapper) {
-    fetch(`https://api.tomtom.com/search/2/search/${encodeURIComponent(query)}.json?key=${tomtomKey}&language=pl-PL&limit=5`).then(res => res.json()).then(data => {
+    fetch(`/api/search?q=${encodeURIComponent(query)}`).then(res => res.json()).then(data => {
         if (data.results && data.results.length > 0) {
             const formattedResults = data.results.map(r => ({ name: r.poi ? r.poi.name : (r.address.localName || r.address.freeformAddress), context: r.address.freeformAddress + (r.address.country ? `, ${r.address.country}` : ''), lat: r.position.lat, lng: r.position.lon }));
             renderDropdown(formattedResults, dropdown, inputEl, wrapper);
@@ -267,16 +314,46 @@ function autoFillSpecs() { const s = defaultSpecs[document.getElementById('v-typ
 // =========================================================================
 // 6. ROUTING TOMTOM (Wersja wektorowa z klikalnymi alternatywami i dymkami)
 // =========================================================================
-async function calculateRoute() {
+async function calculateRoute(isBackground = false) {
     const p = profiles[activeProfileIdx];
-    if (!p.isConfigured) return alert("Skonfiguruj pojazd w ustawieniach!");
+    if (!p.isConfigured) {
+        if (!isBackground) alert("Skonfiguruj pojazd w ustawieniach!");
+        return;
+    }
 
-    const points = Array.from(document.querySelectorAll('#sortable-route-list .route-point')).map(pt => {
+    const routePointsElements = Array.from(document.querySelectorAll('#sortable-route-list .route-point'));
+    const points = routePointsElements.map(pt => {
         const lat = pt.querySelector('.lat-val').value, lng = pt.querySelector('.lng-val').value;
         return (lat && lng) ? `${lat},${lng}` : null;
     }).filter(Boolean);
 
-    if (points.length < 2) return alert("Wybierz poprawnie lokalizacje.");
+    if (points.length < 2) {
+        if (!isBackground) alert("Wybierz poprawnie lokalizacje.");
+        return;
+    }
+
+    // Zapisujemy trasę (Start i Cel) w pamięci urządzenia (LocalStorage)
+    try {
+        const startEl = routePointsElements[0];
+        const destEl = routePointsElements[routePointsElements.length - 1];
+
+        const startData = {
+            name: startEl.querySelector('.place-input').value,
+            lat: startEl.querySelector('.lat-val').value,
+            lng: startEl.querySelector('.lng-val').value
+        };
+        const destData = {
+            name: destEl.querySelector('.place-input').value,
+            lat: destEl.querySelector('.lat-val').value,
+            lng: destEl.querySelector('.lng-val').value
+        };
+
+        if (startData.lat && destData.lat) {
+            localStorage.setItem('trucknav_last_route', JSON.stringify({ start: startData, dest: destData }));
+        }
+    } catch (e) {
+        console.warn("Błąd zapisu do LocalStorage", e);
+    }
 
     let travelMode = (p.type === "bus" || p.type === "van") ? p.type : "truck";
     let dims = `&vehicleWeight=${p.w*1000}&vehicleAxleWeight=${p.aw*1000}&vehicleLength=${p.l}&vehicleWidth=${p.wid}&vehicleHeight=${p.h}&vehicleMaxSpeed=${p.speed}`;
@@ -284,12 +361,13 @@ async function calculateRoute() {
     if(p.adrLoad) dims += `&vehicleLoadType=${p.adrLoad}`;
     if(p.adrTunnel) dims += `&vehicleAdrcTunnelRestrictionCode=${p.adrTunnel}`;
 
-    // UWAGA: maxAlternatives=2 zwraca aż 3 trasy
-    const url = `https://api.tomtom.com/routing/1/calculateRoute/${points.join(':')}/json?key=${tomtomKey}&travelMode=${travelMode}&vehicleCommercial=true${dims}&traffic=true&maxAlternatives=2`;
-
     try {
-        document.getElementById('calc-btn-text').innerText = "Szukam trasy...";
-        const response = await fetch(url);
+        if (!isBackground) document.getElementById('calc-btn-text').innerText = "Szukam trasy...";
+        const response = await fetch('/api/route', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ points: points.join(':'), travelMode, dims })
+        });
         const data = await response.json();
 
         currentRoutesData = { type: 'FeatureCollection', features: [] };
@@ -318,51 +396,69 @@ async function calculateRoute() {
             });
 
             // Rysowanie na mapie
-            if (map.getSource('routes')) {
-                map.getSource('routes').setData(currentRoutesData);
-            } else {
-                map.addSource('routes', { type: 'geojson', data: currentRoutesData });
+            // Twarde czyszczenie błędnych/starych warstw aby zapobiec konfliktom dodawania addLayer
+            if (map.getLayer('routes-line')) map.removeLayer('routes-line');
+            if (map.getLayer('routes-click')) map.removeLayer('routes-click');
+            if (map.getSource('routes')) map.removeSource('routes');
 
-                // Szeroka, niewidzialna warstwa do ułatwienia klikania palcem na ekranie
-                map.addLayer({
-                    id: 'routes-click', type: 'line', source: 'routes',
-                    layout: { 'line-join': 'round', 'line-cap': 'round' },
-                    paint: { 'line-width': 30, 'line-opacity': 0 }
-                });
+            map.addSource('routes', { type: 'geojson', data: currentRoutesData });
 
-                // Właściwa widoczna linia
-                map.addLayer({
-                    id: 'routes-line', type: 'line', source: 'routes',
-                    layout: { 'line-join': 'round', 'line-cap': 'round' },
-                    paint: {
+            // Szeroka, niewidzialna warstwa do ułatwienia klikania palcem na ekranie
+            map.addLayer({
+                id: 'routes-click', type: 'line', source: 'routes',
+                layout: { 'line-join': 'round', 'line-cap': 'round' },
+                paint: { 'line-width': 30, 'line-opacity': 0 }
+            });
+
+            // Właściwa widoczna linia
+            map.addLayer({
+                id: 'routes-line', type: 'line', source: 'routes',
+                layout: { 'line-join': 'round', 'line-cap': 'round' },
+                paint: {
                         'line-color': ['case', ['boolean', ['get', 'isMain'], false], '#1a73e8', '#808080'],
-                        'line-width': ['case', ['boolean', ['get', 'isMain'], false], 7, 5],
-                        'line-opacity': ['case', ['boolean', ['get', 'isMain'], false], 1.0, 0.6]
-                    }
-                });
+                    'line-width': ['case', ['boolean', ['get', 'isMain'], false], 10, 6],
+                    'line-opacity': ['case', ['boolean', ['get', 'isMain'], false], 1.0, 0.6]
+                }
+            });
 
-                // Obsługa kliknięcia w alternatywną trasę
-                map.on('click', 'routes-click', (e) => {
-                    const clickedIdx = e.features[0].properties.index;
-                    currentRoutesData.features.forEach(f => f.properties.isMain = (f.properties.index === clickedIdx));
-                    map.getSource('routes').setData(currentRoutesData);
+            // Obsługa kliknięcia w alternatywną trasę
+            // Najpierw zdejmujemy stare ewentualne nasłuchiwania by nie dublować callów
+            map.off('click', 'routes-click');
+            map.on('click', 'routes-click', (e) => {
+                const clickedIdx = e.features[0].properties.index;
+                currentRoutesData.features.forEach(f => f.properties.isMain = (f.properties.index === clickedIdx));
+                map.getSource('routes').setData(currentRoutesData);
 
-                    const p = currentRoutesData.features.find(f => f.properties.isMain).properties;
-                    updateTelemetryPanel(p);
-                    renderRouteTooltips();
-                });
+                const p = currentRoutesData.features.find(f => f.properties.isMain).properties;
+                updateTelemetryPanel(p);
+                renderRouteTooltips();
+            });
+
+            if (!isBackground) {
+                renderRouteTooltips();
+
+                // Centrowanie mapy tylko, gdy nie jedziemy (nie w tle)
+                const bounds = new maptilersdk.LngLatBounds();
+                currentRoutesData.features[0].geometry.coordinates.forEach(c => bounds.extend(c));
+                map.fitBounds(bounds, { padding: 50 });
+
+                // Pokaż przycisk Start Nav oraz Powrót tylko gdy wyliczamy nową trasę jako użytkownik
+                document.getElementById('start-drive-btn').style.display = 'block';
+                document.getElementById('exit-routing-btn').style.display = 'block';
+            } else {
+                // Gdy jesteśmy w tle usuwamy stare dymki z poprzedniej trasy jeśli były
+                routeTooltips.forEach(t => t.remove());
+                routeTooltips = [];
             }
 
-            renderRouteTooltips();
+            // Ale telemetrię odświeżamy zawsze
             updateTelemetryPanel(currentRoutesData.features[0].properties);
-
-            // Centrowanie mapy
-            const bounds = new maptilersdk.LngLatBounds();
-            currentRoutesData.features[0].geometry.coordinates.forEach(c => bounds.extend(c));
-            map.fitBounds(bounds, { padding: 50 });
         }
-    } catch (e) { alert("Wystąpił problem z wyznaczeniem trasy."); }
-    finally { document.getElementById('calc-btn-text').innerText = "Wyznacz trasę"; }
+    } catch (err) {
+        if (!isBackground) alert('CRASH TRASY: ' + err.message + ' | ' + err.stack);
+        console.error(err);
+    }
+    finally { if (!isBackground) document.getElementById('calc-btn-text').innerText = "Wyznacz trasę"; }
 }
 
 function renderRouteTooltips() {
@@ -465,7 +561,7 @@ function setupSimpleSearch(inputId) {
             })
             .catch(() => {
                 // 2. KASKADA: TOMTOM (1 płatne zapytanie)
-                const tomtomUrl = `https://api.tomtom.com/search/2/search/${encodeURIComponent(query)}.json?key=${tomtomKey}&language=pl-PL&limit=5&typeahead=true&lat=${center.lat}&lon=${center.lng}`;
+                const tomtomUrl = `/api/search?q=${encodeURIComponent(query)}&lat=${center.lat}&lon=${center.lng}`;
 
                 fetch(tomtomUrl)
                 .then(res => res.json())
@@ -545,15 +641,333 @@ function dropPinAndShowAction(lat, lng, name, context) {
 }
 
 function openFullPanel() {
-    // Ukrywamy czysty interfejs
-    document.getElementById('simple-search-bar').style.display = 'none';
+    // Ukrywamy tylko dolny pasek "Prowadź" (jeśli był widoczny) i okno wyszukiwarki pozostawiamy ZAWSZE widoczne dopóki nie zacznie się jazda
     document.getElementById('bottom-action-bar').style.display = 'none';
 
-    // Otwieramy główny panel (wypełniony już współrzędnymi GPS na starcie i wybranym celem)
+    // Otwieramy główny panel (wybór pojazdu/trasowanie) pod wyszukiwarką
     document.getElementById('full-search-panel').style.display = 'block';
 
-    // Zamykamy dymek adresowy, żeby nie zasłaniał mapy podczas szukania trasy
+    // Zamykamy dymek adresowy z mapy
     if (destinationMarker) destinationMarker.togglePopup();
 }
 
+function exitRouting() {
+    // Zatrzymaj jeśli jedziemy
+    stopNavigation();
+
+    // Usuwanie warstw na mapie
+    if (map.getSource('routes')) {
+        if (map.getLayer('routes-line')) map.removeLayer('routes-line');
+        if (map.getLayer('routes-click')) map.removeLayer('routes-click');
+        map.removeSource('routes');
+    }
+
+    currentRoutesData = null;
+    routeTooltips.forEach(t => t.remove());
+    routeTooltips = [];
+
+    // Zresetuj UI
+    document.getElementById('full-search-panel').style.display = 'none';
+    document.getElementById('exit-routing-btn').style.display = 'none';
+    document.getElementById('telemetry-panel').style.display = 'none';
+    document.getElementById('start-drive-btn').style.display = 'none';
+
+    // Przywróć wyszukiwarki
+    document.getElementById('simple-search-bar').style.display = 'block';
+    document.getElementById('poi-panel-container').style.display = 'flex';
+
+    // Wyśrodkuj na GPS
+    if (currentUserLocation) {
+        map.flyTo({ center: [currentUserLocation.lng, currentUserLocation.lat], zoom: 14.5, pitch: 45, duration: 1500 });
+    }
+}
+
 window.onload = initMap;
+
+// =========================================================================
+// 8. OBSŁUGA POI Z OVERPASS API
+// =========================================================================
+
+function togglePoiMenu() {
+    document.getElementById('poi-menu').classList.toggle('show');
+}
+
+function updatePoiVisibility() {
+    const parkingEnabled = document.getElementById('poi-parking').checked;
+    const fuelEnabled = document.getElementById('poi-fuel').checked;
+    const mopEnabled = document.getElementById('poi-mop').checked;
+    const laybyEnabled = document.getElementById('poi-layby').checked;
+
+    poiMarkers.forEach(markerObj => {
+        const type = markerObj.poiType;
+        const el = markerObj.marker.getElement();
+
+        let isVisible = false;
+        if (type === 'parking' && parkingEnabled) isVisible = true;
+        if (type === 'fuel' && fuelEnabled) isVisible = true;
+        if (type === 'mop' && mopEnabled) isVisible = true;
+        if (type === 'layby' && laybyEnabled) isVisible = true;
+
+        el.style.display = isVisible ? 'flex' : 'none';
+    });
+}
+
+async function fetchPOIs() {
+    if (map.getZoom() < 13) {
+        poiMarkers.forEach(m => m.marker.remove());
+        poiMarkers = [];
+        return;
+    }
+
+    const parkingEnabled = document.getElementById('poi-parking').checked;
+    const fuelEnabled = document.getElementById('poi-fuel').checked;
+    const mopEnabled = document.getElementById('poi-mop').checked;
+    const laybyEnabled = document.getElementById('poi-layby').checked;
+
+    if (!parkingEnabled && !fuelEnabled && !mopEnabled && !laybyEnabled) {
+        // Jeśli wszystko jest odznaczone, ukrywamy je po stronie klienta (nie ma potrzeby ubijać zapytań zupełnie)
+        // Ale możemy zaoszczędzić request:
+        poiMarkers.forEach(m => m.marker.remove());
+        poiMarkers = [];
+        return;
+    }
+
+    const bounds = map.getBounds();
+    const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
+
+    let filters = [];
+    if (parkingEnabled) filters.push(`node["amenity"="parking"](${bbox});way["amenity"="parking"](${bbox});`);
+    if (fuelEnabled) filters.push(`node["amenity"="fuel"](${bbox});way["amenity"="fuel"](${bbox});`);
+    if (mopEnabled) filters.push(`node["highway"~"rest_area|services"](${bbox});way["highway"~"rest_area|services"](${bbox});`);
+    if (laybyEnabled) filters.push(`node["highway"="layby"](${bbox});way["highway"="layby"](${bbox});`);
+
+    const query = `[out:json][timeout:5];(${filters.join('')});out center;`;
+    const url = `https://lz4.overpass-api.de/api/interpreter`;
+
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `data=${encodeURIComponent(query)}`
+        });
+
+        if (res.status === 429) return;
+        if (!res.ok) throw new Error("HTTP status: " + res.status);
+
+        const data = await res.json();
+
+        // Czyszczenie poprzednich
+        poiMarkers.forEach(m => m.marker.remove());
+        poiMarkers = [];
+
+        data.elements.forEach(el => {
+            const lat = el.lat || (el.center && el.center.lat);
+            const lon = el.lon || (el.center && el.center.lon);
+            if (!lat || !lon) return;
+
+            let icon = "📍";
+            const tags = el.tags || {};
+
+            if (tags.amenity === "parking") icon = "🅿️";
+            else if (tags.amenity === "fuel") icon = "⛽";
+            else if (tags.highway === "rest_area" || tags.highway === "services") icon = "☕";
+            else if (tags.highway === "layby") icon = "🛣️";
+
+            const elDiv = document.createElement('div');
+            elDiv.className = 'osm-poi-marker';
+            elDiv.innerHTML = icon;
+            elDiv.onclick = (e) => {
+                e.stopPropagation();
+                dropPinAndShowAction(lat, lon, tags.name || "Brak nazwy (POI)", (tags.amenity || tags.highway));
+            };
+
+            const marker = new maptilersdk.Marker({ element: elDiv }).setLngLat([lon, lat]).addTo(map);
+
+            // Określenie typu dla client-side filteringu
+            let poiType = "";
+            if (tags.amenity === "parking") poiType = "parking";
+            else if (tags.amenity === "fuel") poiType = "fuel";
+            else if (tags.highway === "rest_area" || tags.highway === "services") poiType = "mop";
+            else if (tags.highway === "layby") poiType = "layby";
+
+            poiMarkers.push({ marker: marker, poiType: poiType });
+        });
+
+        // Po załadowaniu nowych markerów od razu stosujemy na nich obecny stan filtrów
+        updatePoiVisibility();
+
+    } catch (e) {
+        console.warn("Błąd pobierania POI z Overpass:", e);
+    }
+}
+
+// =========================================================================
+// 9. TRYB JAZDY NA ŻYWO (GPS WATCH, OBRÓT, PITCH)
+// =========================================================================
+let lastRouteCalcTime = 0;
+
+function recenterMap() {
+    isUserPanning = false;
+    document.getElementById('recenter-btn').style.display = 'none';
+
+    // Upewniamy sie ze pobieramy koordynaty przypiete (jesli myDriveMarker istnieje, to z niego)
+    let lng = currentUserLocation ? currentUserLocation.lng : 19.0;
+    let lat = currentUserLocation ? currentUserLocation.lat : 50.0;
+    if (myDriveMarker) {
+        const coords = myDriveMarker.getLngLat();
+        lng = coords.lng;
+        lat = coords.lat;
+    }
+
+    // Wymuszamy idealną wysokość nawigacji i kąt 3D (Zgodnie z wymaganiami powrotu do defaultu)
+    map.easeTo({
+        center: [lng, lat],
+        zoom: 14.5, // niezależnie od tego jak bardzo użytkownik ją wcześniej przybliżył/oddalił
+        pitch: 55,  // Powrót do trybu jazdy 3D
+        duration: 1000
+    });
+}
+
+function hideSearchPanels() {
+    document.getElementById('full-search-panel').style.display = 'none';
+    document.getElementById('simple-search-bar').style.display = 'none';
+    document.getElementById('poi-panel-container').style.display = 'none';
+    document.getElementById('start-drive-btn').style.display = 'none';
+    document.getElementById('stop-drive-btn').style.display = 'block';
+
+    // Upewniamy się ze ukrylismy smieci z poprzedniej wersji UI jezeli są
+    const extBtn = document.getElementById('exit-routing-btn');
+    if (extBtn) extBtn.style.display = 'none';
+}
+
+function startNavigation() {
+    // Blokada ekranu (Screen Wake Lock API)
+    if ('wakeLock' in navigator) {
+        navigator.wakeLock.request('screen').then(wl => {
+            wakeLock = wl;
+        }).catch(err => console.warn('Błąd Wake Lock:', err));
+    }
+
+    // 1. Ukryj paski i alternatywne trasy
+    hideSearchPanels();
+
+    if (currentRoutesData) {
+        const mainRoute = currentRoutesData.features.find(f => f.properties.isMain);
+        if (mainRoute) {
+            map.getSource('routes').setData({
+                type: 'FeatureCollection',
+                features: [mainRoute]
+            });
+        }
+    }
+    routeTooltips.forEach(t => t.remove());
+    routeTooltips = [];
+
+    // 2. FIZYCZNIE przełącz mapę w tryb jazdy 3D (pochylenie i delikatny zoom)
+    map.setPitch(55);
+    map.setZoom(14.5);
+    isUserPanning = false;
+
+    // 3. FIZYCZNIE odpal śledzenie GPS na żywo
+    if (navigator.geolocation) {
+        // Jeśli marker jeszcze nie istnieje, stwórzmy go (np. jako niebieskie kółko)
+        if (!myDriveMarker) {
+            const el = document.createElement('div');
+            el.style.width = '24px';
+            el.style.height = '24px';
+            el.style.background = '#1a73e8';
+            el.style.border = '3px solid white';
+            el.style.borderRadius = '50%';
+            el.style.boxShadow = '0 0 10px rgba(0,0,0,0.5)';
+            el.style.pointerEvents = 'none'; // Odpinamy wszelkie zjawiska touch & hover
+            el.style.transition = 'transform 1s linear';
+
+            myDriveMarker = new maptilersdk.Marker({ element: el, pitchAlignment: 'map', interactive: false }).setLngLat([0,0]).addTo(map);
+        }
+
+        navWatchId = navigator.geolocation.watchPosition(function(position) {
+            const lat = position.coords.latitude;
+            const lng = position.coords.longitude;
+            currentUserLocation = { lat, lng };
+
+            let markerLng = lng;
+            let markerLat = lat;
+
+            // Jeśli mamy wyznaczoną trasę, przyciągamy znacznik do najbliższego punktu na linii
+            if (currentRoutesData && currentRoutesData.features.length > 0) {
+                const routeCoords = currentRoutesData.features.find(f => f.properties.isMain).geometry.coordinates;
+                let minDist = Infinity;
+                let closestCoord = null;
+
+                // Szukamy najbliższego punktu trasy w promieniu kilku kilometrów
+                for (let i = 0; i < Math.min(100, routeCoords.length); i++) {
+                    const dist = Math.pow(routeCoords[i][0] - lng, 2) + Math.pow(routeCoords[i][1] - lat, 2);
+                    if (dist < minDist) {
+                        minDist = dist;
+                        closestCoord = routeCoords[i];
+                    }
+                }
+
+                // Jeśli jesteśmy w akceptowalnym korytarzu błędu (np. ok 100-200m), snapuj do trasy
+                if (minDist < 0.00005 && closestCoord) {
+                    markerLng = closestCoord[0];
+                    markerLat = closestCoord[1];
+                }
+            }
+
+            myDriveMarker.setLngLat([markerLng, markerLat]);
+
+            // WAŻNE: Aktualizuj centrowanie mapy również na podstawie przyciągniętych współrzędnych!
+            if (!isUserPanning) {
+                map.easeTo({ center: [markerLng, markerLat], bearing: position.coords.heading || map.getBearing(), duration: 1000, easing: t => t });
+            }
+
+            // Route Trimming: Obcinanie przejechanych punktów za ciężarówką
+            if (currentRoutesData && currentRoutesData.features && currentRoutesData.features.length > 0) {
+                // Bezpieczne wymuszenie ukrycia szarych, odrzuconych tras by nie wracały przy trimowaniu
+                currentRoutesData.features = currentRoutesData.features.filter(f => f.properties.isMain);
+
+                let coords = currentRoutesData.features[0].geometry.coordinates;
+                let minDist = Infinity;
+                let closestIdx = 0;
+                // Szukaj najbliższego punktu tylko w promieniu kilkudziesięciu najbliższych, żeby nie zawracać
+                for (let i = 0; i < Math.min(50, coords.length); i++) {
+                    const dist = Math.pow(coords[i][0] - lng, 2) + Math.pow(coords[i][1] - lat, 2);
+                    if (dist < minDist) { minDist = dist; closestIdx = i; }
+                }
+                if (closestIdx > 0) {
+                    currentRoutesData.features[0].geometry.coordinates = coords.slice(closestIdx);
+                    if (map.getSource('routes')) map.getSource('routes').setData(currentRoutesData);
+                }
+            }
+        }, function(error) {
+            console.error('Błąd GPS: ' + error.message);
+        }, { enableHighAccuracy: true });
+    } else {
+        alert('Twoja przeglądarka nie obsługuje GPS!');
+    }
+}
+
+function stopNavigation() {
+    if (wakeLock) {
+        wakeLock.release().then(() => wakeLock = null);
+    }
+
+    if (navWatchId) {
+        navigator.geolocation.clearWatch(navWatchId);
+        navWatchId = null;
+    }
+    map.setPitch(0); // Zgodnie z wczesniejsza wola user (nie zostawiamy 45 pochylonego bo user narzekal na to kiedys)
+    map.setBearing(0);
+
+    if(myDriveMarker) { myDriveMarker.remove(); myDriveMarker = null; }
+
+    // Przywróć wyszukiwarkę bazową
+    document.getElementById('full-search-panel').style.display = 'none';
+    document.getElementById('stop-drive-btn').style.display = 'none';
+    document.getElementById('simple-search-bar').style.display = 'block';
+    document.getElementById('poi-panel-container').style.display = 'flex';
+    document.getElementById('recenter-btn').style.display = 'none';
+
+    if(map.getSource('routes')) map.getSource('routes').setData({ type: 'FeatureCollection', features: [] });
+}
