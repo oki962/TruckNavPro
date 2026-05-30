@@ -809,9 +809,23 @@ let lastRouteCalcTime = 0;
 function recenterMap() {
     isUserPanning = false;
     document.getElementById('recenter-btn').style.display = 'none';
-    if (currentUserLocation) {
-        map.flyTo({ center: [currentUserLocation.lng, currentUserLocation.lat], zoom: 14.5, pitch: 55, duration: 800 });
+
+    // Upewniamy sie ze pobieramy koordynaty przypiete (jesli myDriveMarker istnieje, to z niego)
+    let lng = currentUserLocation ? currentUserLocation.lng : 19.0;
+    let lat = currentUserLocation ? currentUserLocation.lat : 50.0;
+    if (myDriveMarker) {
+        const coords = myDriveMarker.getLngLat();
+        lng = coords.lng;
+        lat = coords.lat;
     }
+
+    // Wymuszamy idealną wysokość nawigacji i kąt 3D (Zgodnie z wymaganiami powrotu do defaultu)
+    map.easeTo({
+        center: [lng, lat],
+        zoom: 14.5, // niezależnie od tego jak bardzo użytkownik ją wcześniej przybliżył/oddalił
+        pitch: 55,  // Powrót do trybu jazdy 3D
+        duration: 1000
+    });
 }
 
 function hideSearchPanels() {
@@ -866,6 +880,7 @@ function startNavigation() {
             el.style.borderRadius = '50%';
             el.style.boxShadow = '0 0 10px rgba(0,0,0,0.5)';
             el.style.pointerEvents = 'none'; // Odpinamy wszelkie zjawiska touch & hover
+            el.style.transition = 'transform 1s linear';
 
             myDriveMarker = new maptilersdk.Marker({ element: el, pitchAlignment: 'map', interactive: false }).setLngLat([0,0]).addTo(map);
         }
